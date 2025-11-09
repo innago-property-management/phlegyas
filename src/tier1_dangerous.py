@@ -1,0 +1,148 @@
+"""
+Tier 1: Dangerous Pattern Detection
+
+Immediately denies operations that match known dangerous patterns.
+No AI evaluation needed - these are always blocked.
+"""
+
+import re
+from typing import Any
+
+
+class DangerousPatternDetector:
+    """Detects dangerous operations that should always be denied."""
+
+    DESTRUCTIVE_PATTERNS = [
+        re.compile(r"rm\s+-rf", re.IGNORECASE),
+        re.compile(r"DROP\s+(TABLE|DATABASE)", re.IGNORECASE),
+        re.compile(r"DELETE\s+FROM.*WHERE", re.IGNORECASE),
+        re.compile(r"TRUNCATE\s+TABLE", re.IGNORECASE),
+        re.compile(r"format\s+[cC]:", re.IGNORECASE),  # Windows format drive
+        re.compile(r"mkfs\.", re.IGNORECASE),  # Linux format filesystem
+    ]
+
+    PRODUCTION_PATTERNS = [
+        re.compile(r"production", re.IGNORECASE),
+        re.compile(r"prod-db", re.IGNORECASE),
+        re.compile(r"--env=prod", re.IGNORECASE),
+        re.compile(r"master(?:_|\b)", re.IGNORECASE),  # Master database/branch operations
+        re.compile(r"main(?:_|\b)", re.IGNORECASE),  # Main branch operations
+    ]
+
+    CREDENTIAL_PATTERNS = [
+        re.compile(r"password\s*=", re.IGNORECASE),
+        re.compile(r"secret\s*=", re.IGNORECASE),
+        re.compile(r"api[_-]?key", re.IGNORECASE),
+        re.compile(r"AWS_SECRET", re.IGNORECASE),
+        re.compile(r"ANTHROPIC_API_KEY", re.IGNORECASE),
+        re.compile(r"Bearer\s+", re.IGNORECASE),
+    ]
+
+    DANGEROUS_GIT_PATTERNS = [
+        re.compile(r"git\s+push\s+--force", re.IGNORECASE),
+        re.compile(r"git\s+push\s+-f", re.IGNORECASE),
+        re.compile(r"git\s+reset\s+--hard", re.IGNORECASE),
+        re.compile(r"git\s+clean\s+-[fF]d", re.IGNORECASE),
+        re.compile(r"git\s+push.*origin\s+(main|master)", re.IGNORECASE),
+    ]
+
+    NETWORK_PATTERNS = [
+        re.compile(r"curl.*-X\s+DELETE", re.IGNORECASE),
+        re.compile(r"wget.*--delete-after", re.IGNORECASE),
+    ]
+
+    def is_dangerous(self, tool_name: str, input_data: dict[str, Any]) -> tuple[bool, str | None]:
+        """
+        Check if an operation matches dangerous patterns.
+
+        Args:
+            tool_name: The tool being used (e.g., "Bash", "Edit", "Write")
+            input_data: The parameters for the tool
+
+        Returns:
+            Tuple of (is_dangerous, reason)
+            - is_dangerous: True if operation should be blocked
+            - reason: Explanation of why it's dangerous (or None if safe)
+        """
+        if tool_name == "Bash":
+            command = input_data.get("command", "")
+            return self._check_bash_command(command)
+
+        if tool_name == "Edit":
+            # Check if editing sensitive files
+            file_path = input_data.get("file_path", "")
+            new_string = input_data.get("new_string", "")
+
+            if self._is_sensitive_file(file_path):
+                if self._contains_credentials(new_string):
+                    return True, "Blocked: Attempting to add credentials to tracked file"
+
+        if tool_name == "Write":
+            file_path = input_data.get("file_path", "")
+            content = input_data.get("content", "")
+
+            if self._is_sensitive_file(file_path):
+                if self._contains_credentials(content):
+                    return True, "Blocked: Attempting to write credentials to tracked file"
+
+        return False, None
+
+    def _check_bash_command(self, command: str) -> tuple[bool, str | None]:
+        """Check if bash command matches dangerous patterns."""
+
+        # Check destructive operations
+        for pattern in self.DESTRUCTIVE_PATTERNS:
+            if pattern.search(command):
+                return True, f"Blocked: Destructive operation detected - {pattern.pattern}"
+
+        # Check production operations
+        for pattern in self.PRODUCTION_PATTERNS:
+            if pattern.search(command):
+                return (
+                    True,
+                    f"Blocked: Production environment operation detected - {pattern.pattern}",
+                )
+
+        # Check dangerous git operations
+        for pattern in self.DANGEROUS_GIT_PATTERNS:
+            if pattern.search(command):
+                return True, f"Blocked: Dangerous git operation detected - {pattern.pattern}"
+
+        # Check network operations
+        for pattern in self.NETWORK_PATTERNS:
+            if pattern.search(command):
+                return True, f"Blocked: Potentially dangerous network operation - {pattern.pattern}"
+
+        return False, None
+
+    def _is_sensitive_file(self, file_path: str) -> bool:
+        """Check if file path is sensitive (not .gitignored)."""
+        sensitive_patterns = [
+            ".env",
+            "secrets",
+            "config.json",
+            "appsettings.json",
+            ".aws/credentials",
+            ".ssh/",
+            "id_rsa",
+        ]
+
+        # Files that SHOULD be gitignored
+        gitignore_patterns = [".env", "secrets.json", ".aws/credentials"]
+
+        file_lower = file_path.lower()
+
+        # If it's a file that should be gitignored, it's not sensitive
+        # (we assume it's already gitignored)
+        if any(pattern in file_lower for pattern in gitignore_patterns):
+            return False
+
+        # Other config files are sensitive
+        return any(pattern in file_lower for pattern in sensitive_patterns)
+
+    def _contains_credentials(self, content: str) -> bool:
+        """Check if content contains credential patterns."""
+        for pattern in self.CREDENTIAL_PATTERNS:
+            if pattern.search(content):
+                return True
+        return False
