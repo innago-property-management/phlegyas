@@ -383,7 +383,7 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
     try:
         decision, evaluation = await ai_evaluator.evaluate(tool_name, input_data)
 
-        if decision == "allow":
+        if decision == "approve":
             message = (
                 f"AI-approved (confidence: {evaluation.confidence:.2f}): "
                 f"{evaluation.reasoning}"
@@ -546,7 +546,7 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
     # Process the decision (whether from cache or fresh evaluation)
     try:
 
-        if decision == "allow":
+        if decision == "approve":
             logger.info(f"APPROVED (Tier 3): {evaluation.reasoning}")
             write_audit_log(
                 tool_name,

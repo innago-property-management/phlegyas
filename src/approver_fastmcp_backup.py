@@ -136,7 +136,7 @@ async def permissions__approve(
     try:
         decision, evaluation = await ai_evaluator.evaluate(tool_name, input)
 
-        if decision == "allow":
+        if decision == "approve":
             message = (
                 f"AI-approved (confidence: {evaluation.confidence:.2f}): "
                 f"{evaluation.reasoning}"
