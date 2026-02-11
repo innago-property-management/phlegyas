@@ -23,7 +23,7 @@ class DangerousPatternDetector:
 
     PRODUCTION_PATTERNS = [
         re.compile(r"production", re.IGNORECASE),
-        re.compile(r"prod-db", re.IGNORECASE),
+        re.compile(r"prod[-_]", re.IGNORECASE),
         re.compile(r"--env=prod", re.IGNORECASE),
         re.compile(r"master(?:_|\b)", re.IGNORECASE),  # Master database/branch operations
         re.compile(r"main(?:_|\b)", re.IGNORECASE),  # Main branch operations
@@ -89,11 +89,19 @@ class DangerousPatternDetector:
 
     def _check_bash_command(self, command: str) -> tuple[bool, str | None]:
         """Check if bash command matches dangerous patterns."""
+        if command is None:
+            return False, None
 
         # Check destructive operations
         for pattern in self.DESTRUCTIVE_PATTERNS:
             if pattern.search(command):
                 return True, f"Blocked: Destructive operation detected - {pattern.pattern}"
+
+        # Check dangerous git operations (before production patterns so
+        # "git push origin main" is caught as a git operation, not production)
+        for pattern in self.DANGEROUS_GIT_PATTERNS:
+            if pattern.search(command):
+                return True, f"Blocked: Dangerous git operation detected - {pattern.pattern}"
 
         # Check production operations
         for pattern in self.PRODUCTION_PATTERNS:
@@ -102,11 +110,6 @@ class DangerousPatternDetector:
                     True,
                     f"Blocked: Production environment operation detected - {pattern.pattern}",
                 )
-
-        # Check dangerous git operations
-        for pattern in self.DANGEROUS_GIT_PATTERNS:
-            if pattern.search(command):
-                return True, f"Blocked: Dangerous git operation detected - {pattern.pattern}"
 
         # Check network operations
         for pattern in self.NETWORK_PATTERNS:

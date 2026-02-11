@@ -1,0 +1,34 @@
+{
+  "schema_version": "1.0",
+  "chains": {
+    "session-2026-02-11-fix-tests-cli": {
+      "branch": "init",
+      "worktree": "/Volumes/Repos/claude-permission-approver",
+      "started_at": "2026-02-11T12:00:00Z",
+      "agent": "claude-code-opus-4.6",
+      "entries": [
+        {
+          "sequence": 0,
+          "commit_sha": "pending",
+          "parent_sha": "1eb3345",
+          "timestamp": "2026-02-11T19:52:08Z",
+          "instruction_summary": "Fix all 26 test failures, add CLI approve script",
+          "instruction_hash": "sha256:session-context",
+          "files": [
+            "src/tier1_dangerous.py",
+            "tests/test_tier1_dangerous.py",
+            "tests/test_tier2_safe.py",
+            "tests/test_validate_operation.py",
+            "tests/test_approver.py",
+            "scripts/approve",
+            "scripts/approve_cli.py"
+          ],
+          "diff_stat": {"insertions": 0, "deletions": 0},
+          "entry_hash": "sha256:aeffeda1d286324b9b5d098475f80735891ebcc2f92ed1f451c812e1a53a63ec"
+        }
+      ],
+      "chain_hash": "sha256:aeffeda1d286324b9b5d098475f80735891ebcc2f92ed1f451c812e1a53a63ec",
+      "sealed": false
+    }
+  }
+}

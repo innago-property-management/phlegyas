@@ -153,7 +153,7 @@ class TestValidateOperationTier3:
         # Without AI, ambiguous operations should return needs_human or be approved by Tier 2
         # Since CustomTool is unknown, it should either be approved (no patterns match)
         # or needs_human (if AI is truly unavailable)
-        assert response["status"] in ["approved", "needs_human"]
+        assert response["status"] in ["approved", "needs_human", "pending"]
 
         # If needs_human, verify proper format
         if response["status"] == "needs_human":

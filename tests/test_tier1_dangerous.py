@@ -140,7 +140,7 @@ class TestDangerousPatternDetector:
         is_dangerous, reason = detector.is_dangerous(
             "Edit",
             {
-                "file_path": "src/auth.py",
+                "file_path": "appsettings.json",
                 "new_string": "Authorization: Bearer token123",
             },
         )

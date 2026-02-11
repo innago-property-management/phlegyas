@@ -1,0 +1,37 @@
+#!/bin/bash
+# approve - Check if a Claude Code operation would be approved or denied
+#
+# Usage:
+#   approve Bash "git push origin main"        # Check a bash command
+#   approve Read '{"file_path": "/etc/passwd"}' # Check with JSON input
+#   approve Edit ".env"                         # Check an edit target
+#   approve --json Bash "npm install"           # JSON output for scripting
+#   approve --no-ai Bash "curl http://x.com"   # Skip AI evaluation (fast)
+#
+# Exit codes:
+#   0 = allowed
+#   1 = denied
+#   2 = unknown / needs human
+#
+# Environment:
+#   ANTHROPIC_API_KEY  - Required for Tier 3 AI evaluation
+#   CLAUDE_MODEL       - AI model (default: claude-3-5-haiku-20241022)
+#   PROJECT_NAME       - Project context for AI decisions
+#   PROJECT_TYPE       - Project type for AI decisions
+#   CURRENT_TASK       - Current task for AI decisions
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+
+# Find Python - prefer project venv
+if [ -x "$PROJECT_DIR/.venv/bin/python" ]; then
+    PYTHON="$PROJECT_DIR/.venv/bin/python"
+elif [ -x "$PROJECT_DIR/venv/bin/python" ]; then
+    PYTHON="$PROJECT_DIR/venv/bin/python"
+else
+    PYTHON="python3"
+fi
+
+exec "$PYTHON" "$SCRIPT_DIR/approve_cli.py" "$@"

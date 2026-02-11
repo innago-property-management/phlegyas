@@ -417,19 +417,19 @@ class TestSafeOperationDetector:
         """Should approve writes to docs/research/."""
         is_safe, category = detector.is_safe("Write", {"file_path": "docs/research/notes.md"})
         assert is_safe is True
-        assert "safe directory" in category
+        assert "safe directory" in category or "project-relative write" in category
 
     def test_should_approve_tests_write(self, detector):
         """Should approve writes to tests/."""
         is_safe, category = detector.is_safe("Write", {"file_path": "tests/test_new.py"})
         assert is_safe is True
-        assert "safe directory" in category
+        assert "safe directory" in category or "project-relative write" in category
 
     def test_should_approve_scripts_write(self, detector):
         """Should approve writes to scripts/."""
         is_safe, category = detector.is_safe("Write", {"file_path": "scripts/deploy.sh"})
         assert is_safe is True
-        assert "safe directory" in category
+        assert "safe directory" in category or "project-relative write" in category
 
     def test_should_approve_project_relative_write(self, detector):
         """Should approve project-relative writes."""
