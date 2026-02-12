@@ -24,6 +24,9 @@ dev = [
     "pytest-mock>=3.14.0",
 ]
 
+[project.scripts]
+claude-permission-approver = "src.approver_mcp:run"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
