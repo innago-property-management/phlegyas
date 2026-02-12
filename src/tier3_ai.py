@@ -56,6 +56,11 @@ class AIEvaluator:
         self.project_type = os.getenv("PROJECT_TYPE", "Software project")
         self.current_task = os.getenv("CURRENT_TASK", "Development work")
 
+    def close(self):
+        """Close the underlying HTTP client to release connections."""
+        if self.client:
+            self.client.close()
+
     async def evaluate(
         self, tool_name: str, input_data: dict[str, Any]
     ) -> tuple[str, EvaluationResult]:

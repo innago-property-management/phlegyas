@@ -35,7 +35,7 @@ jobs:
           ANTHROPIC_API_KEY: "sk-ant-test-key-ci-only"
           ENABLE_AUDIT_LOG: "false"
         run: |
-          pytest tests/ -v --tb=short --junitxml=test-results.xml
+          pytest tests/ -v --tb=short --junitxml=test-results.xml -W ignore::pytest.PytestUnraisableExceptionWarning
       - name: Test Summary
         if: always()
         run: |
