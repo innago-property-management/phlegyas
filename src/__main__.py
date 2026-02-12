@@ -1,4 +1,4 @@
-"""Allow running as ``python -m src``."""
+"""Allow running as ``python -m claude_permission_approver`` or ``python -m src``."""
 
 from src.approver_mcp import run
 

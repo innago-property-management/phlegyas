@@ -4,6 +4,7 @@ Claude Permission Approver - Official MCP SDK Implementation
 Three-tier intelligent permission approval system using official mcp.server
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -808,8 +809,6 @@ async def main():
 
 def run():
     """Synchronous entry point for console_scripts."""
-    import asyncio
-
     asyncio.run(main())
 
 
