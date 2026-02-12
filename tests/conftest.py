@@ -3,7 +3,6 @@ Pytest configuration and shared fixtures for claude-permission-approver tests.
 """
 
 import json
-import os
 from typing import Any
 
 import pytest

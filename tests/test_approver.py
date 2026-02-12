@@ -7,20 +7,16 @@ evaluation pipeline.
 """
 
 import json
-import os
-import tempfile
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from src.approver import write_audit_log
 from src.tier1_dangerous import DangerousPatternDetector
 from src.tier2_safe import SafeOperationDetector
 from src.tier3_ai import AIEvaluator
-
-# Re-use audit log helpers from the approver module
-from src.approver import write_audit_log
 
 
 async def evaluate_permission(

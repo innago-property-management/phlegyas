@@ -14,7 +14,7 @@ from typing import Any
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
-from mcp.types import Tool, TextContent
+from mcp.types import TextContent, Tool
 
 from src.tier1_dangerous import DangerousPatternDetector
 from src.tier2_safe import SafeOperationDetector
@@ -350,7 +350,7 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
     """Handle permissions__approve tool call."""
     tool_name = arguments["tool_name"]
     input_data = arguments["input"]
-    tool_use_id = arguments.get("tool_use_id")
+    _tool_use_id = arguments.get("tool_use_id")
 
     logger.info(f"Permission request: {tool_name}")
     logger.debug(f"Input: {json.dumps(input_data, indent=2)}")
@@ -775,7 +775,7 @@ async def handle_get_pending_approvals(arguments: dict[str, Any]) -> list[TextCo
     agent_id_filter = arguments.get("agent_id")
 
     pending_list = []
-    for request_id, pending in pending_approvals.items():
+    for _request_id, pending in pending_approvals.items():
         # Apply filters
         if workflow_id_filter and pending.workflow_id != workflow_id_filter:
             continue

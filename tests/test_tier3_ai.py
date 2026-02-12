@@ -5,7 +5,6 @@ Tests for AI evaluation of ambiguous permission requests.
 """
 
 import json
-from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 

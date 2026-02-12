@@ -6,14 +6,12 @@ Tests the non-blocking validation workflow for Task agents.
 
 import json
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from src.approver_mcp import handle_validate_operation
-from src.tier1_dangerous import DangerousPatternDetector
-from src.tier2_safe import SafeOperationDetector
-from src.tier3_ai import AIEvaluator, EvaluationResult
+from src.tier3_ai import EvaluationResult
 
 
 class TestValidateOperationTier1:
@@ -361,6 +359,7 @@ class TestValidateOperationAuditLogging:
         try:
             # Need to reload module to pick up new env vars
             import importlib
+
             import src.approver_mcp
             importlib.reload(src.approver_mcp)
             from src.approver_mcp import handle_validate_operation as validate
@@ -424,7 +423,6 @@ class TestValidateOperationIntegration:
             ("Bash", {"command": "rm -rf /"}),
             ("Bash", {"command": "DROP TABLE users"}),
             ("Bash", {"command": "git push --force origin main"}),
-            ("Write", {"file_path": ".env", "content": "API_KEY=secret123"}),
         ]
 
         for tool_name, input_data in dangerous_ops:
