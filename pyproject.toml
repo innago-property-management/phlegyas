@@ -44,10 +44,10 @@ markers = [
     "asyncio: Tests that use async/await",
 ]
 filterwarnings = [
-    "error",
     "ignore::DeprecationWarning",
     "ignore::PendingDeprecationWarning",
     "ignore::pytest.PytestUnraisableExceptionWarning",
+    "error",
 ]
 
 [tool.ruff]
