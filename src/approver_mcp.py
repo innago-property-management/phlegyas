@@ -8,7 +8,7 @@ import hashlib
 import json
 import logging
 import os
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from dotenv import load_dotenv
@@ -69,12 +69,12 @@ class PendingApproval:
         self.tier = tier
         self.workflow_id = workflow_id
         self.agent_id = agent_id
-        self.created_at = datetime.utcnow()
+        self.created_at = datetime.now(UTC)
         self.expires_at = self.created_at + timedelta(seconds=PENDING_TTL_SECONDS)
         self.status = "pending"  # pending, approved, denied, expired
 
     def is_expired(self) -> bool:
-        return datetime.utcnow() > self.expires_at
+        return datetime.now(UTC) > self.expires_at
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,7 +90,7 @@ class PendingApproval:
             "expires_at": self.expires_at.isoformat(),
             "status": self.status,
             "ttl_remaining_seconds": max(
-                0, int((self.expires_at - datetime.utcnow()).total_seconds())
+                0, int((self.expires_at - datetime.now(UTC)).total_seconds())
             ),
         }
 
@@ -146,7 +146,7 @@ def write_audit_log(
         return
 
     log_entry = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "tool_name": tool_name,
         "input": input_data,
         "decision": decision,
@@ -190,7 +190,7 @@ def get_cached_decision(operation_hash: str) -> tuple[str, Any, datetime] | None
     decision, evaluation, timestamp = approval_cache[operation_hash]
 
     # Check if cache entry is expired
-    if datetime.utcnow() - timestamp > timedelta(seconds=CACHE_TTL_SECONDS):
+    if datetime.now(UTC) - timestamp > timedelta(seconds=CACHE_TTL_SECONDS):
         # Remove expired entry
         del approval_cache[operation_hash]
         logger.debug(f"Cache entry expired for hash {operation_hash[:8]}...")
@@ -212,7 +212,7 @@ def cache_decision(operation_hash: str, decision: str, evaluation: Any):
     if not CACHE_ENABLED:
         return
 
-    approval_cache[operation_hash] = (decision, evaluation, datetime.utcnow())
+    approval_cache[operation_hash] = (decision, evaluation, datetime.now(UTC))
     logger.debug(
         f"Cached decision for hash {operation_hash[:8]}... (cache size: {len(approval_cache)})"
     )

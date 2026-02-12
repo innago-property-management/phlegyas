@@ -37,8 +37,17 @@ testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+addopts = "-v --strict-markers --tb=short --color=yes"
+markers = [
+    "unit: Unit tests for individual components",
+    "integration: Integration tests for multi-tier flow",
+    "asyncio: Tests that use async/await",
+]
 filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::PendingDeprecationWarning",
     "ignore::pytest.PytestUnraisableExceptionWarning",
+    "error",
 ]
 
 [tool.ruff]

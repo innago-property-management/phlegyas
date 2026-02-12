@@ -10,7 +10,7 @@ Three-tier intelligent permission approval system:
 import json
 import logging
 import os
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 
 from dotenv import load_dotenv
@@ -73,7 +73,7 @@ def write_audit_log(
         return
 
     log_entry = {
-        "timestamp": datetime.utcnow().isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
         "tool_name": tool_name,
         "input": input_data,
         "decision": decision,
