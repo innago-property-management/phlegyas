@@ -7,3 +7,10 @@ repos:
         description: Detect hardcoded secrets using Gitleaks
         entry: zricethezav/gitleaks protect
         language: docker_image
+  - repo: local
+    hooks:
+      - id: prevent-commits-to-default-branch
+        name: prevent commits to default branch
+        entry: prevent-commits-to-default-branch.sh
+        language: script
+

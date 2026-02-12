@@ -1,0 +1,6 @@
+# Auto-generated for CI merge-checks (pip-audit, pip-licenses)
+# Source of truth is pyproject.toml — this file is for CI tooling only
+fastmcp>=0.2.0
+anthropic>=0.39.0
+pydantic>=2.0.0
+python-dotenv>=1.0.0
