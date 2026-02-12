@@ -45,9 +45,7 @@ class TestAIEvaluator:
 
     def test_should_set_custom_thresholds(self):
         """Should accept custom confidence thresholds."""
-        evaluator = AIEvaluator(
-            api_key="sk-ant-test", approval_threshold=0.9, denial_threshold=0.1
-        )
+        evaluator = AIEvaluator(api_key="sk-ant-test", approval_threshold=0.9, denial_threshold=0.1)
         assert evaluator.approval_threshold == 0.9
         assert evaluator.denial_threshold == 0.1
 
@@ -241,9 +239,7 @@ class TestAIEvaluator:
     # Full Evaluation Tests (with mocked API)
 
     @pytest.mark.asyncio
-    async def test_should_evaluate_and_approve(
-        self, evaluator, mock_anthropic_response, mocker
-    ):
+    async def test_should_evaluate_and_approve(self, evaluator, mock_anthropic_response, mocker):
         """Should evaluate operation and return approval."""
         mock_response = mock_anthropic_response(
             decision="approve", category="benign", reasoning="Safe operation", confidence=0.9
@@ -271,9 +267,7 @@ class TestAIEvaluator:
         assert evaluation.category == "critical"
 
     @pytest.mark.asyncio
-    async def test_should_evaluate_and_ask_user(
-        self, evaluator, mock_anthropic_response, mocker
-    ):
+    async def test_should_evaluate_and_ask_user(self, evaluator, mock_anthropic_response, mocker):
         """Should evaluate operation and escalate to user."""
         mock_response = mock_anthropic_response(
             decision="ask_user",

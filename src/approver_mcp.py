@@ -89,16 +89,15 @@ class PendingApproval:
             "created_at": self.created_at.isoformat(),
             "expires_at": self.expires_at.isoformat(),
             "status": self.status,
-            "ttl_remaining_seconds": max(0, int((self.expires_at - datetime.utcnow()).total_seconds())),
+            "ttl_remaining_seconds": max(
+                0, int((self.expires_at - datetime.utcnow()).total_seconds())
+            ),
         }
 
 
 def cleanup_expired_pending():
     """Remove expired pending approvals."""
-    expired = [
-        req_id for req_id, pending in pending_approvals.items()
-        if pending.is_expired()
-    ]
+    expired = [req_id for req_id, pending in pending_approvals.items() if pending.is_expired()]
     for req_id in expired:
         pending = pending_approvals.pop(req_id)
         logger.info(f"Expired pending approval: {req_id} for {pending.tool_name}")
@@ -110,6 +109,7 @@ def cleanup_expired_pending():
             f"Approval expired after {PENDING_TTL_SECONDS}s",
             pending.confidence,
         )
+
 
 # Initialize AI evaluator
 ai_evaluator = None
@@ -170,9 +170,7 @@ def compute_operation_hash(tool_name: str, input_data: dict[str, Any]) -> str:
     """
     # Create a stable string representation
     operation_str = json.dumps(
-        {"tool": tool_name, "input": input_data},
-        sort_keys=True,
-        default=str
+        {"tool": tool_name, "input": input_data}, sort_keys=True, default=str
     )
     return hashlib.sha256(operation_str.encode()).hexdigest()
 
@@ -215,7 +213,9 @@ def cache_decision(operation_hash: str, decision: str, evaluation: Any):
         return
 
     approval_cache[operation_hash] = (decision, evaluation, datetime.utcnow())
-    logger.debug(f"Cached decision for hash {operation_hash[:8]}... (cache size: {len(approval_cache)})")
+    logger.debug(
+        f"Cached decision for hash {operation_hash[:8]}... (cache size: {len(approval_cache)})"
+    )
 
 
 # Create MCP server
@@ -385,8 +385,7 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
 
         if decision == "approve":
             message = (
-                f"AI-approved (confidence: {evaluation.confidence:.2f}): "
-                f"{evaluation.reasoning}"
+                f"AI-approved (confidence: {evaluation.confidence:.2f}): {evaluation.reasoning}"
             )
             logger.info(f"APPROVED (Tier 3): {message}")
             write_audit_log(
@@ -401,10 +400,7 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
             return [TextContent(type="text", text=json.dumps(result))]
 
         elif decision == "deny":
-            message = (
-                f"AI-denied (confidence: {evaluation.confidence:.2f}): "
-                f"{evaluation.reasoning}"
-            )
+            message = f"AI-denied (confidence: {evaluation.confidence:.2f}): {evaluation.reasoning}"
             logger.warning(f"DENIED (Tier 3): {message}")
             write_audit_log(
                 tool_name,
@@ -545,7 +541,6 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
 
     # Process the decision (whether from cache or fresh evaluation)
     try:
-
         if decision == "approve":
             logger.info(f"APPROVED (Tier 3): {evaluation.reasoning}")
             write_audit_log(
@@ -687,7 +682,11 @@ async def handle_get_approval_stats(arguments: dict[str, Any]) -> list[TextConte
         return [TextContent(type="text", text=json.dumps(stats))]
 
     except Exception as e:
-        return [TextContent(type="text", text=json.dumps({"error": f"Failed to read audit log: {str(e)}"}))]
+        return [
+            TextContent(
+                type="text", text=json.dumps({"error": f"Failed to read audit log: {str(e)}"})
+            )
+        ]
 
 
 async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]:
@@ -742,7 +741,9 @@ async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]
         pending.input_data,
         final_decision,
         f"{pending.tier}_human_{decision}d",
-        f"Human decision by {approver_id}: {reason}" if reason else f"Human decision by {approver_id}",
+        f"Human decision by {approver_id}: {reason}"
+        if reason
+        else f"Human decision by {approver_id}",
         pending.confidence,
     )
 

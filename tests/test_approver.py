@@ -56,15 +56,11 @@ async def evaluate_permission(
         # AI returns "approve"/"deny"/"ask_user" from _apply_thresholds
         if decision == "approve":
             message = (
-                f"AI-approved (confidence: {evaluation.confidence:.2f}): "
-                f"{evaluation.reasoning}"
+                f"AI-approved (confidence: {evaluation.confidence:.2f}): {evaluation.reasoning}"
             )
             return {"behavior": "allow", "message": message}
         elif decision == "deny":
-            message = (
-                f"AI-denied (confidence: {evaluation.confidence:.2f}): "
-                f"{evaluation.reasoning}"
-            )
+            message = f"AI-denied (confidence: {evaluation.confidence:.2f}): {evaluation.reasoning}"
             return {"behavior": "deny", "message": message}
         else:  # ask_user
             message = (
@@ -172,7 +168,9 @@ class TestPermissionApprovalFlow:
             )
             assert result["behavior"] == "deny"
             # tier3_ai catches exceptions internally and returns ask_user
-            assert "AI evaluation failed" in result["message"] or "human approval" in result["message"]
+            assert (
+                "AI evaluation failed" in result["message"] or "human approval" in result["message"]
+            )
 
     # Audit Logging Tests
 
@@ -232,8 +230,18 @@ class TestPermissionApprovalFlow:
 
         entries = [
             {"tool_name": "Bash", "decision": "allow", "tier": "tier2_safe", "reason": "safe git"},
-            {"tool_name": "Bash", "decision": "deny", "tier": "tier1_dangerous", "reason": "rm -rf"},
-            {"tool_name": "Edit", "decision": "allow", "tier": "tier3_ai_approve", "reason": "safe edit"},
+            {
+                "tool_name": "Bash",
+                "decision": "deny",
+                "tier": "tier1_dangerous",
+                "reason": "rm -rf",
+            },
+            {
+                "tool_name": "Edit",
+                "decision": "allow",
+                "tier": "tier3_ai_approve",
+                "reason": "safe edit",
+            },
         ]
 
         with open(audit_file, "w") as f:
@@ -359,6 +367,6 @@ class TestPermissionApprovalFlow:
 
         for tool_name, input_data in operations:
             result = await evaluate_permission(tool_name, input_data)
-            assert (
-                result["behavior"] == "deny"
-            ), f"Failed to block credential operation: {tool_name}"
+            assert result["behavior"] == "deny", (
+                f"Failed to block credential operation: {tool_name}"
+            )

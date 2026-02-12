@@ -51,9 +51,7 @@ class TestSafeOperationDetector:
 
     def test_should_approve_firecrawl_search(self, detector):
         """Should auto-approve Firecrawl search tool."""
-        is_safe, category = detector.is_safe(
-            "mcp__firecrawl__firecrawl_search", {"query": "test"}
-        )
+        is_safe, category = detector.is_safe("mcp__firecrawl__firecrawl_search", {"query": "test"})
         assert is_safe is True
         assert "read-only tool" in category
 

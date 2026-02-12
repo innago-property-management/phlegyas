@@ -77,17 +77,13 @@ class TestDangerousPatternDetector:
 
     def test_should_block_env_prod_flag(self, detector):
         """Should block commands with --env=prod flag."""
-        is_dangerous, reason = detector.is_dangerous(
-            "Bash", {"command": "deploy.sh --env=prod"}
-        )
+        is_dangerous, reason = detector.is_dangerous("Bash", {"command": "deploy.sh --env=prod"})
         assert is_dangerous is True
         assert "Production environment" in reason
 
     def test_should_block_master_branch_operations(self, detector):
         """Should block operations targeting master branch."""
-        is_dangerous, reason = detector.is_dangerous(
-            "Bash", {"command": "git checkout master"}
-        )
+        is_dangerous, reason = detector.is_dangerous("Bash", {"command": "git checkout master"})
         assert is_dangerous is True
         assert "Production environment" in reason
 

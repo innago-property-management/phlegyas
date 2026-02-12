@@ -187,7 +187,7 @@ Provide your evaluation now:"""
 
             # Strategy 2: Extract first complete JSON object using regex
             # This handles cases where Claude returns JSON followed by explanation text
-            json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+            json_pattern = r"\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}"
             match = re.search(json_pattern, response_text, re.DOTALL)
             if match:
                 response_text = match.group(0)

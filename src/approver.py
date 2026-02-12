@@ -138,8 +138,7 @@ async def permissions__approve(
 
         if decision == "approve":
             message = (
-                f"AI-approved (confidence: {evaluation.confidence:.2f}): "
-                f"{evaluation.reasoning}"
+                f"AI-approved (confidence: {evaluation.confidence:.2f}): {evaluation.reasoning}"
             )
             logger.info(f"APPROVED (Tier 3): {message}")
             write_audit_log(
@@ -153,10 +152,7 @@ async def permissions__approve(
             return {"behavior": "allow", "message": message}
 
         elif decision == "deny":
-            message = (
-                f"AI-denied (confidence: {evaluation.confidence:.2f}): "
-                f"{evaluation.reasoning}"
-            )
+            message = f"AI-denied (confidence: {evaluation.confidence:.2f}): {evaluation.reasoning}"
             logger.warning(f"DENIED (Tier 3): {message}")
             write_audit_log(
                 tool_name,
