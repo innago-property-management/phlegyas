@@ -3,3 +3,6 @@
 *.zip
 secrets/
 .idea/
+__pycache__/
+*.pyc
+audit.jsonl
