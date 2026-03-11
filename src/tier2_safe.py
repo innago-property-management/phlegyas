@@ -89,6 +89,48 @@ class SafeOperationDetector:
         re.compile(r"^diff\s+", re.IGNORECASE),
         re.compile(r"^icalBuddy\s+", re.IGNORECASE),
         re.compile(r"^remindctl\s+", re.IGNORECASE),
+        re.compile(r"^uname(\s+|$)", re.IGNORECASE),
+        re.compile(r"^hostname$", re.IGNORECASE),
+        re.compile(r"^whoami$", re.IGNORECASE),
+        re.compile(r"^id(\s+|$)", re.IGNORECASE),
+        re.compile(r"^date(\s+|$)", re.IGNORECASE),
+        re.compile(r"^uptime$", re.IGNORECASE),
+        re.compile(r"^df(\s+|$)", re.IGNORECASE),
+        re.compile(r"^du\s+", re.IGNORECASE),
+        re.compile(r"^free(\s+|$)", re.IGNORECASE),
+        re.compile(r"^top\s+-[bl]", re.IGNORECASE),
+        re.compile(r"^pip\s+list", re.IGNORECASE),
+        re.compile(r"^pip\s+show\s+", re.IGNORECASE),
+        re.compile(r"^pip\s+freeze", re.IGNORECASE),
+        re.compile(r"^npm\s+list", re.IGNORECASE),
+        re.compile(r"^npm\s+ls", re.IGNORECASE),
+        re.compile(r"^npm\s+outdated", re.IGNORECASE),
+        re.compile(r"^dotnet\s+--list-(sdks|runtimes)", re.IGNORECASE),
+        re.compile(r"^dotnet\s+--version", re.IGNORECASE),
+        re.compile(r"^dotnet\s+--info", re.IGNORECASE),
+        re.compile(r"^python3?\s+-c\s+", re.IGNORECASE),
+        re.compile(r"^python3?\s+--version", re.IGNORECASE),
+        re.compile(r"^node\s+--version", re.IGNORECASE),
+        re.compile(r"^ruby\s+--version", re.IGNORECASE),
+        re.compile(r"^java\s+--version", re.IGNORECASE),
+        re.compile(r"^sw_vers", re.IGNORECASE),
+        re.compile(r"^xcodebuild\s+-version", re.IGNORECASE),
+        re.compile(r"^brew\s+(list|info|search|outdated)", re.IGNORECASE),
+        re.compile(r"^gh\s+(pr|issue|run|repo)\s+(list|view|status|checks)", re.IGNORECASE),
+        re.compile(r"^gh\s+api\s+", re.IGNORECASE),
+        re.compile(r"^jq\s+", re.IGNORECASE),
+        re.compile(r"^sort(\s+|$)", re.IGNORECASE),
+        re.compile(r"^uniq(\s+|$)", re.IGNORECASE),
+        re.compile(r"^cut\s+", re.IGNORECASE),
+        re.compile(r"^awk\s+", re.IGNORECASE),
+        re.compile(r"^sed\s+-n\s+", re.IGNORECASE),
+        re.compile(r"^basename\s+", re.IGNORECASE),
+        re.compile(r"^dirname\s+", re.IGNORECASE),
+        re.compile(r"^realpath\s+", re.IGNORECASE),
+        re.compile(r"^readlink\s+", re.IGNORECASE),
+        re.compile(r"^md5(sum)?\s+", re.IGNORECASE),
+        re.compile(r"^sha256sum\s+", re.IGNORECASE),
+        re.compile(r"^shasum\s+", re.IGNORECASE),
     ]
 
     # Package installation (generally safe in dev environments)
@@ -166,8 +208,17 @@ class SafeOperationDetector:
 
         return False, None
 
+    # Prefixes that are safe setup boilerplate and can be stripped for matching
+    _SAFE_PREFIXES = re.compile(
+        r"^(?:source\s+\.?\.?/?\.?venv/bin/activate\s*&&\s*|cd\s+\S+\s*&&\s*)+",
+        re.IGNORECASE,
+    )
+
     def _check_bash_command(self, command: str) -> tuple[bool, str | None]:
         """Check if bash command is in a safe category."""
+
+        # Strip safe prefixes (venv activation, cd) before pattern matching
+        command = self._SAFE_PREFIXES.sub("", command).strip()
 
         # Check git operations
         for pattern in self.SAFE_GIT_PATTERNS:
