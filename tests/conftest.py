@@ -213,7 +213,7 @@ def safe_info_commands() -> list[str]:
         "dotnet --list-sdks",
         "dotnet --version",
         "dotnet --info",
-        "python3 -c 'import sys; print(sys.version)'",
+        "python3 --version",
         "python --version",
         "node --version",
         "sw_vers",
