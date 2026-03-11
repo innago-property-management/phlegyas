@@ -87,6 +87,8 @@ class SafeOperationDetector:
         re.compile(r"^stat\s+", re.IGNORECASE),
         re.compile(r"^wc\s+", re.IGNORECASE),
         re.compile(r"^diff\s+", re.IGNORECASE),
+        re.compile(r"^icalBuddy\s+", re.IGNORECASE),
+        re.compile(r"^remindctl\s+", re.IGNORECASE),
     ]
 
     # Package installation (generally safe in dev environments)
