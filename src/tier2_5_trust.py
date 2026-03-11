@@ -30,9 +30,10 @@ import logging
 import os
 import re
 import stat
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -304,5 +305,8 @@ class ScriptTrustStore:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         serialised = json.dumps(self._data, indent=2, ensure_ascii=False)
         self._path.write_text(serialised, encoding="utf-8")
-        # Restrict permissions to owner read/write only
-        os.chmod(self._path, stat.S_IRUSR | stat.S_IWUSR)
+        # Restrict permissions to owner read/write only (best-effort on non-POSIX)
+        try:
+            os.chmod(self._path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass

@@ -126,6 +126,9 @@ def pieces_checkpoint(action: str, path: str, entry: dict[str, str] | None) -> N
     # Write to append-only changelog alongside trust store
     changelog_path = Path.home() / ".claude" / "trusted-scripts.log"
     try:
+        import os
+        import stat
+
         with open(changelog_path, "a", encoding="utf-8") as f:
             f.write(f"[{datetime.now(UTC).isoformat()}] {action}: {path}")
             if entry and entry.get("content_hash"):
@@ -133,6 +136,11 @@ def pieces_checkpoint(action: str, path: str, entry: dict[str, str] | None) -> N
             if entry and entry.get("note"):
                 f.write(f" — {entry['note']}")
             f.write("\n")
+        # Align permissions with trust store JSON (0600)
+        try:
+            os.chmod(changelog_path, stat.S_IRUSR | stat.S_IWUSR)
+        except OSError:
+            pass
     except OSError:
         pass
 

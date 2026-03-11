@@ -10,17 +10,12 @@ Tests cover:
 """
 
 import hashlib
-import json
-import os
 import stat
-import tempfile
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from src.tier2_5_trust import ScriptTrustStore
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -261,6 +256,7 @@ def test_is_trusted_non_bash_tool_returns_false(store: ScriptTrustStore):
         ("bash ./setup.sh", "./setup.sh"),
         ("sh /opt/scripts/run.sh", "/opt/scripts/run.sh"),
         ("sh -c /path/to/script.sh", "/path/to/script.sh"),
+        ("bash -c /path/to/script.sh", "/path/to/script.sh"),
     ],
 )
 def test_detect_script_path(store: ScriptTrustStore, command: str, expected_path: str):
@@ -362,7 +358,7 @@ def test_modified_script_falls_through_to_tier3(
 
     is_trusted, category = store.is_trusted("Bash", {"command": str(sample_script)})
     assert is_trusted is False
-    # Should fall through to Tier 3 - not blocked by Tier 2.5
+    assert category is not None and category.startswith("hash_mismatch")
 
 
 @pytest.mark.integration

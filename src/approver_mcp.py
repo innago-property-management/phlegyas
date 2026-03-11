@@ -383,8 +383,8 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
         write_audit_log(tool_name, input_data, "allow", "tier2_5_trusted_script", trust_category)
         result = {"behavior": "allow", "message": message, "updatedInput": {}}
         return [TextContent(type="text", text=json.dumps(result))]
-    elif trust_category and trust_category.startswith("hash_mismatch"):
-        logger.warning(f"Tier 2.5 hash mismatch - falling through to Tier 3: {trust_category}")
+    elif trust_category:
+        logger.warning(f"Tier 2.5 trust-store degradation - falling through to Tier 3: {trust_category}")
 
     # Tier 3: AI evaluation
     if ai_evaluator is None:
@@ -521,8 +521,8 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
             "request_id": None,
         }
         return [TextContent(type="text", text=json.dumps(result))]
-    elif trust_category and trust_category.startswith("hash_mismatch"):
-        logger.warning(f"Tier 2.5 hash mismatch - falling through to Tier 3: {trust_category}")
+    elif trust_category:
+        logger.warning(f"Tier 2.5 trust-store degradation - falling through to Tier 3: {trust_category}")
 
     # Tier 3: AI evaluation (with caching)
     operation_hash = compute_operation_hash(tool_name, input_data)
