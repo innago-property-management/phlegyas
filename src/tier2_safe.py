@@ -123,7 +123,7 @@ class SafeOperationDetector:
         re.compile(r"^uniq(\s+|$)", re.IGNORECASE),
         re.compile(r"^cut\s+", re.IGNORECASE),
         re.compile(r"^awk\s+", re.IGNORECASE),
-        re.compile(r"^sed\s+-n\s+", re.IGNORECASE),
+        re.compile(r"^sed\s+-n\s+(?!.*-i)", re.IGNORECASE),
         re.compile(r"^basename\s+", re.IGNORECASE),
         re.compile(r"^dirname\s+", re.IGNORECASE),
         re.compile(r"^realpath\s+", re.IGNORECASE),
