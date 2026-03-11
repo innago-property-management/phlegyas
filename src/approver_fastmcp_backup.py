@@ -41,7 +41,7 @@ safe_detector = SafeOperationDetector()
 # Initialize AI evaluator
 ai_evaluator = None
 try:
-    model = os.getenv("CLAUDE_MODEL", "claude-3-5-haiku-20241022")
+    model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
     approval_threshold = float(os.getenv("APPROVAL_CONFIDENCE_THRESHOLD", "0.8"))
     denial_threshold = float(os.getenv("DENIAL_CONFIDENCE_THRESHOLD", "0.2"))
 

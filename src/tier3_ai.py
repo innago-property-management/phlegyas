@@ -29,7 +29,7 @@ class AIEvaluator:
     def __init__(
         self,
         api_key: str | None = None,
-        model: str = "claude-3-5-haiku-20241022",
+        model: str = "claude-haiku-4-5-20251001",
         approval_threshold: float = 0.8,
         denial_threshold: float = 0.2,
     ):

@@ -63,7 +63,7 @@ ANTHROPIC_API_KEY=sk-ant-your-key-here
 
 **Optional (with defaults):**
 ```bash
-CLAUDE_MODEL=claude-3-5-haiku-20241022
+CLAUDE_MODEL=claude-haiku-4-5-20251001
 APPROVAL_CONFIDENCE_THRESHOLD=0.8
 LOG_LEVEL=INFO
 ENABLE_AUDIT_LOG=true
@@ -254,7 +254,7 @@ Output:
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ANTHROPIC_API_KEY` | **Required** | Your Anthropic API key |
-| `CLAUDE_MODEL` | `claude-3-5-haiku-20241022` | Model for AI evaluation (haiku/sonnet) |
+| `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | Model for AI evaluation (haiku/sonnet) |
 | `APPROVAL_CONFIDENCE_THRESHOLD` | `0.8` | Min confidence for auto-approval (0.0-1.0) |
 | `DENIAL_CONFIDENCE_THRESHOLD` | `0.2` | Max confidence for auto-denial (0.0-1.0) |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR) |

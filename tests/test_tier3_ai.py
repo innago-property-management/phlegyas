@@ -19,7 +19,7 @@ class TestAIEvaluator:
         """Create an AIEvaluator instance with mocked API key."""
         return AIEvaluator(
             api_key="sk-ant-test-key",
-            model="claude-3-5-haiku-20241022",
+            model="claude-haiku-4-5-20251001",
             approval_threshold=0.8,
             denial_threshold=0.2,
         )
@@ -30,7 +30,7 @@ class TestAIEvaluator:
         """Should initialize with explicit API key."""
         evaluator = AIEvaluator(api_key="sk-ant-test")
         assert evaluator.api_key == "sk-ant-test"
-        assert evaluator.model == "claude-3-5-haiku-20241022"
+        assert evaluator.model == "claude-haiku-4-5-20251001"
 
     def test_should_initialize_with_env_var(self, mock_env_vars):
         """Should initialize with ANTHROPIC_API_KEY environment variable."""
