@@ -26,6 +26,7 @@ dev = [
 
 [project.scripts]
 claude-permission-approver = "src.approver_mcp:run"
+claude-trust = "src.trust_cli:main"
 
 [build-system]
 requires = ["hatchling"]

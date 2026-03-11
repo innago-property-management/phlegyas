@@ -18,6 +18,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
 from src.tier1_dangerous import DangerousPatternDetector
+from src.tier2_5_trust import ScriptTrustStore
 from src.tier2_safe import SafeOperationDetector
 from src.tier3_ai import AIEvaluator
 
@@ -35,6 +36,7 @@ logger = logging.getLogger(__name__)
 # Initialize detectors
 dangerous_detector = DangerousPatternDetector()
 safe_detector = SafeOperationDetector()
+trust_store = ScriptTrustStore()
 
 # Approval cache for Tier 3 decisions (improves performance for repeated operations)
 # Cache format: {operation_hash: (decision, evaluation_result, timestamp)}
@@ -373,6 +375,17 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
         result = {"behavior": "allow", "message": message, "updatedInput": {}}
         return [TextContent(type="text", text=json.dumps(result))]
 
+    # Tier 2.5: Check script trust store (TOFU - Trust On First Use)
+    is_trusted, trust_category = trust_store.is_trusted(tool_name, input_data)
+    if is_trusted:
+        message = f"Auto-approved (Tier 2.5): {trust_category}"
+        logger.info(f"APPROVED (Tier 2.5): {trust_category}")
+        write_audit_log(tool_name, input_data, "allow", "tier2_5_trusted_script", trust_category)
+        result = {"behavior": "allow", "message": message, "updatedInput": {}}
+        return [TextContent(type="text", text=json.dumps(result))]
+    elif trust_category and trust_category.startswith("hash_mismatch"):
+        logger.warning(f"Tier 2.5 hash mismatch - falling through to Tier 3: {trust_category}")
+
     # Tier 3: AI evaluation
     if ai_evaluator is None:
         message = "Denied: AI evaluator unavailable, requires manual approval"
@@ -494,6 +507,22 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
             "request_id": None,
         }
         return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 2.5: Check script trust store (TOFU - Trust On First Use)
+    is_trusted, trust_category = trust_store.is_trusted(tool_name, input_data)
+    if is_trusted:
+        logger.info(f"APPROVED (Tier 2.5): {trust_category}")
+        write_audit_log(tool_name, input_data, "allow", "tier2_5_trusted_script", trust_category)
+        result = {
+            "status": "approved",
+            "tier": "tier2_5_trusted_script",
+            "reason": trust_category,
+            "confidence": None,
+            "request_id": None,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+    elif trust_category and trust_category.startswith("hash_mismatch"):
+        logger.warning(f"Tier 2.5 hash mismatch - falling through to Tier 3: {trust_category}")
 
     # Tier 3: AI evaluation (with caching)
     operation_hash = compute_operation_hash(tool_name, input_data)
