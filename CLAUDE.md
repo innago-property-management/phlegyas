@@ -51,7 +51,7 @@ elif validation["status"] == "needs_human":
 ```json
 {
   "status": "approved" | "denied" | "needs_human",
-  "tier": "tier1_dangerous | tier2_safe | tier3_ai_approve | tier3_ai_deny | tier3_needs_human",
+  "tier": "tier1_dangerous | tier2_safe | tier2_5_trusted_script | tier3_ai_approve | tier3_ai_deny | tier3_needs_human",
   "reason": "Explanation of decision",
   "confidence": 0.85,  // Only for tier3
   "request_id": "uuid"  // Only for needs_human
@@ -149,7 +149,7 @@ ruff check --fix src/ tests/
 
 ### Three-Tier Evaluation Pipeline
 
-**Flow:** `permissions__approve()` → Tier 1 → Tier 2 → Tier 3 → Decision
+**Flow:** `permissions__approve()` → Tier 1 → Tier 2 → Tier 2.5 → Tier 3 → Decision
 
 1. **Tier 1: DangerousPatternDetector** (src/tier1_dangerous.py:12)
    - Regex-based pattern matching for immediate denial
@@ -161,9 +161,16 @@ ruff check --fix src/ tests/
    - Checks: read-only tools, safe bash commands (git/test/lint/build/info), safe directories
    - Returns: `(is_safe: bool, category: str | None)`
 
-3. **Tier 3: AIEvaluator** (src/tier3_ai.py:26)
+3. **Tier 2.5: ScriptTrustStore** (src/tier2_5_trust.py:54)
+   - TOFU (Trust On First Use) with SHA-256 content hashing
+   - Human trusts a script once via `claude-trust` CLI; auto-approves if hash matches
+   - Hash mismatch or missing file → falls through to Tier 3
+   - Persistent store at `~/.claude/trusted-scripts.json`
+   - Returns: `(is_trusted: bool, category: str | None)`
+
+4. **Tier 3: AIEvaluator** (src/tier3_ai.py:26)
    - Claude AI evaluation for ambiguous cases
-   - Uses Haiku (default) or Sonnet models
+   - Uses Haiku 4.5 (default) or Sonnet models
    - Returns: `(decision: str, evaluation: EvaluationResult)` where decision is "allow", "deny", or "ask_user"
    - Applies confidence thresholds to final decision
 
@@ -247,11 +254,40 @@ claude -p "Your task here" \
 
 **Note:** Task agents and interactive sessions do NOT use this flag.
 
+## Script Trust Store (Tier 2.5)
+
+Trust scripts for auto-approval using content hashing (TOFU model).
+
+### CLI: `claude-trust`
+```bash
+# Trust a script (computes SHA-256, adds to store)
+claude-trust /path/to/script.sh --note "Morning schedule"
+
+# List all trusted scripts
+claude-trust --list
+
+# Revoke trust
+claude-trust --revoke /path/to/script.sh
+
+# Verify all hashes still match
+claude-trust --verify
+```
+
+### How It Works
+- Human trusts a script once → SHA-256 hash stored in `~/.claude/trusted-scripts.json`
+- On execution, content hash is verified → match = auto-approve, mismatch = Tier 3 AI eval
+- Tier 1 dangerous patterns still run first (trust store cannot bypass destructive op detection)
+- Changes logged to `~/.claude/trusted-scripts.log` + best-effort Pieces OS checkpoint
+
+### Adding Trusted Scripts
+Edit `~/.claude/trusted-scripts.json` directly or use `claude-trust` CLI. The store is a simple JSON allowlist with 0600 file permissions.
+
 ## Testing Strategy
 
 **Test Files:**
 - `tests/test_tier1_dangerous.py` - Dangerous pattern detection (33 tests)
-- `tests/test_tier2_safe.py` - Safe operation detection (70 tests)
+- `tests/test_tier2_safe.py` - Safe operation detection (75 tests)
+- `tests/test_tier2_5_trust.py` - Script trust store (37 tests)
 - `tests/test_tier3_ai.py` - AI evaluation logic (37 tests)
 - `tests/test_approver.py` - Integration tests (18 tests)
 - `tests/conftest.py` - Shared fixtures and test data
@@ -405,17 +441,21 @@ tail /Volumes/Repos/claude-permission-approver/audit.jsonl
 
 ```
 src/
-  approver.py              # Main FastMCP server with permissions__approve() tool
-  tier1_dangerous.py       # Dangerous pattern detection (regex-based)
-  tier2_safe.py           # Safe operation detection (regex-based)
-  tier3_ai.py             # AI evaluation with Claude (Haiku/Sonnet)
+  approver_mcp.py          # Main MCP server (official SDK) with permissions__approve() tool
+  approver.py              # Legacy FastMCP server
+  tier1_dangerous.py       # Tier 1: Dangerous pattern detection (regex-based)
+  tier2_safe.py            # Tier 2: Safe operation detection (regex-based)
+  tier2_5_trust.py         # Tier 2.5: Script trust store (TOFU + content hashing)
+  tier3_ai.py              # Tier 3: AI evaluation with Claude (Haiku/Sonnet)
+  trust_cli.py             # CLI for managing trusted scripts (claude-trust)
 
 tests/
-  conftest.py             # Shared fixtures and test data
-  test_tier1_dangerous.py # Tier 1 tests
-  test_tier2_safe.py      # Tier 2 tests
-  test_tier3_ai.py        # Tier 3 tests
-  test_approver.py        # Integration tests
+  conftest.py              # Shared fixtures and test data
+  test_tier1_dangerous.py  # Tier 1 tests
+  test_tier2_safe.py       # Tier 2 tests
+  test_tier2_5_trust.py    # Tier 2.5 tests
+  test_tier3_ai.py         # Tier 3 tests
+  test_approver.py         # Integration tests
 
 audit.jsonl              # Audit log (JSONL format, gitignored)
 .env                     # Environment variables (gitignored)

@@ -8,6 +8,7 @@ When running Claude Code with long-running tasks or multi-agent workflows, you n
 
 - **Blocks dangerous operations** instantly (Tier 1)
 - **Auto-approves safe operations** instantly (Tier 2)
+- **Trusts human-approved scripts** via content hashing (Tier 2.5)
 - **Uses Claude AI** to evaluate ambiguous cases (Tier 3)
 - **Escalates to humans** for high-risk operations (optional Slack integration)
 
@@ -133,6 +134,29 @@ Instant approval for known-safe operations:
 - Edits to: project files (excluding `.env`, `secrets`, `credentials`)
 
 **Response time:** <1ms
+**Cost:** $0
+
+### Tier 2.5: Script Trust Store (TOFU)
+
+Auto-approval for human-trusted scripts via content hashing:
+
+- Human trusts a script once with `claude-trust /path/to/script.sh`
+- SHA-256 hash of file contents stored in `~/.claude/trusted-scripts.json`
+- On execution: hash verified → match = auto-approve, mismatch = Tier 3
+- Tier 1 dangerous patterns still checked first (trust cannot bypass)
+- Changes logged to `~/.claude/trusted-scripts.log`
+
+```bash
+# Trust a script
+claude-trust /path/to/script.sh --note "Morning schedule"
+
+# List, revoke, or verify
+claude-trust --list
+claude-trust --revoke /path/to/script.sh
+claude-trust --verify
+```
+
+**Response time:** <1ms (file hash comparison)
 **Cost:** $0
 
 ### Tier 3: AI Evaluation (Ambiguous Cases)
