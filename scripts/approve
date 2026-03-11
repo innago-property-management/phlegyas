@@ -15,7 +15,7 @@
 #
 # Environment:
 #   ANTHROPIC_API_KEY  - Required for Tier 3 AI evaluation
-#   CLAUDE_MODEL       - AI model (default: claude-3-5-haiku-20241022)
+#   CLAUDE_MODEL       - AI model (default: claude-haiku-4-5-20251001)
 #   PROJECT_NAME       - Project context for AI decisions
 #   PROJECT_TYPE       - Project type for AI decisions
 #   CURRENT_TASK       - Current task for AI decisions

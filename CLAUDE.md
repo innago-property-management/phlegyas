@@ -188,7 +188,7 @@ ruff check --fix src/ tests/
 - `ANTHROPIC_API_KEY` - Your Anthropic API key
 
 **Optional (with defaults):**
-- `CLAUDE_MODEL` (default: `claude-3-5-haiku-20241022`) - Model for AI evaluation
+- `CLAUDE_MODEL` (default: `claude-haiku-4-5-20251001`) - Model for AI evaluation
 - `APPROVAL_CONFIDENCE_THRESHOLD` (default: `0.8`) - Min confidence for auto-approval
 - `DENIAL_CONFIDENCE_THRESHOLD` (default: `0.2`) - Max confidence for auto-denial
 - `LOG_LEVEL` (default: `INFO`) - Python logging level
@@ -304,7 +304,7 @@ cat audit.jsonl | jq 'select(.tier == "tier3_ai_approve")'
 from src.tier3_ai import AIEvaluator
 
 evaluator = AIEvaluator(
-    model="claude-3-5-haiku-20241022",
+    model="claude-haiku-4-5-20251001",
     approval_threshold=0.8
 )
 

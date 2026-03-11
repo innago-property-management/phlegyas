@@ -92,7 +92,7 @@ def evaluate_sync(tool_name: str, input_data: dict, use_ai: bool = True) -> dict
     try:
         evaluator = AIEvaluator(
             api_key=api_key,
-            model=os.environ.get("CLAUDE_MODEL", "claude-3-5-haiku-20241022"),
+            model=os.environ.get("CLAUDE_MODEL", "claude-haiku-4-5-20251001"),
         )
         decision, evaluation = asyncio.run(evaluator.evaluate(tool_name, input_data))
         return {
