@@ -103,7 +103,9 @@ class ScriptTrustStore:
             return False, None
 
         # Resolve relative paths relative to cwd for lookup
-        resolved = str(Path(script_path).resolve()) if not script_path.startswith("/") else script_path
+        resolved = (
+            str(Path(script_path).resolve()) if not script_path.startswith("/") else script_path
+        )
 
         # Try both the raw path and the resolved path
         entry = self._data.get(script_path) or self._data.get(resolved)

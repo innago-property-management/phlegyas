@@ -262,7 +262,9 @@ def test_is_trusted_non_bash_tool_returns_false(store: ScriptTrustStore):
 def test_detect_script_path(store: ScriptTrustStore, command: str, expected_path: str):
     """_extract_script_path() should detect various script execution patterns."""
     extracted = store._extract_script_path(command)
-    assert extracted == expected_path, f"From '{command}' expected '{expected_path}', got '{extracted}'"
+    assert extracted == expected_path, (
+        f"From '{command}' expected '{expected_path}', got '{extracted}'"
+    )
 
 
 @pytest.mark.unit
@@ -291,9 +293,7 @@ def test_no_script_detected_for_non_scripts(store: ScriptTrustStore, command: st
 def test_is_trusted_with_bash_prefix(store: ScriptTrustStore, sample_script: Path):
     """is_trusted() should detect 'bash /path/to/script.sh' pattern."""
     store.trust(str(sample_script))
-    is_trusted, category = store.is_trusted(
-        "Bash", {"command": f"bash {sample_script}"}
-    )
+    is_trusted, category = store.is_trusted("Bash", {"command": f"bash {sample_script}"})
     assert is_trusted is True
     assert category == "trusted_script"
 
@@ -302,9 +302,7 @@ def test_is_trusted_with_bash_prefix(store: ScriptTrustStore, sample_script: Pat
 def test_is_trusted_with_sh_prefix(store: ScriptTrustStore, sample_script: Path):
     """is_trusted() should detect 'sh /path/to/script.sh' pattern."""
     store.trust(str(sample_script))
-    is_trusted, category = store.is_trusted(
-        "Bash", {"command": f"sh {sample_script}"}
-    )
+    is_trusted, category = store.is_trusted("Bash", {"command": f"sh {sample_script}"})
     assert is_trusted is True
     assert category == "trusted_script"
 
@@ -315,9 +313,7 @@ def test_is_trusted_with_sh_prefix(store: ScriptTrustStore, sample_script: Path)
 
 
 @pytest.mark.integration
-def test_trusted_script_bypasses_tier3(
-    trust_store_path: Path, sample_script: Path
-):
+def test_trusted_script_bypasses_tier3(trust_store_path: Path, sample_script: Path):
     """A trusted script should be approved at Tier 2.5, not reaching Tier 3."""
     from src.tier1_dangerous import DangerousPatternDetector
     from src.tier2_safe import SafeOperationDetector
@@ -346,9 +342,7 @@ def test_trusted_script_bypasses_tier3(
 
 
 @pytest.mark.integration
-def test_modified_script_falls_through_to_tier3(
-    trust_store_path: Path, sample_script: Path
-):
+def test_modified_script_falls_through_to_tier3(trust_store_path: Path, sample_script: Path):
     """A script with a changed hash should NOT be approved at Tier 2.5."""
     store = ScriptTrustStore(store_path=trust_store_path)
     store.trust(str(sample_script))
@@ -362,9 +356,7 @@ def test_modified_script_falls_through_to_tier3(
 
 
 @pytest.mark.integration
-def test_tier1_dangerous_still_blocks_trusted_scripts(
-    trust_store_path: Path, tmp_path: Path
-):
+def test_tier1_dangerous_still_blocks_trusted_scripts(trust_store_path: Path, tmp_path: Path):
     """Even if a script is trusted, Tier 1 patterns in command should block it.
 
     Note: This tests the pipeline ORDER: Tier 1 runs before Tier 2.5.

@@ -148,10 +148,12 @@ def pieces_checkpoint(action: str, path: str, entry: dict[str, str] | None) -> N
     try:
         import urllib.request
 
-        payload = json.dumps({
-            "application": {"id": "claude-permission-approver"},
-            "text": text,
-        }).encode()
+        payload = json.dumps(
+            {
+                "application": {"id": "claude-permission-approver"},
+                "text": text,
+            }
+        ).encode()
         req = urllib.request.Request(
             "http://localhost:1000/assets/create",
             data=payload,
