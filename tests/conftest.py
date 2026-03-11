@@ -189,6 +189,12 @@ def safe_info_commands() -> list[str]:
         "stat myfile.txt",
         "wc -l *.py",
         "diff old.txt new.txt",
+        "icalBuddy eventsToday",
+        "icalBuddy -n 10 eventsFrom:2026-03-11 to:2026-03-18",
+        "remindctl list",
+        "remindctl list --all",
+        "remindctl create 'Buy milk' --due tomorrow",
+        "remindctl create 'Review PR' --list Work",
     ]
 
 
