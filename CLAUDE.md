@@ -289,13 +289,14 @@ Edit `~/.claude/trusted-scripts.json` directly or use `claude-trust` CLI. The st
 
 ## Testing Strategy
 
-**233 tests, 100% passing.**
+**274 tests, 100% passing.**
 
 **Test Files:**
 - `tests/test_tier1_dangerous.py` - Dangerous pattern detection (32 tests)
 - `tests/test_tier2_safe.py` - Safe operation detection (79 tests)
 - `tests/test_tier2_5_trust.py` - Script trust store (27 tests)
-- `tests/test_tier3_ai.py` - AI evaluation logic (33 tests)
+- `tests/test_tier3_ai.py` - AI evaluation logic (32 tests)
+- `tests/test_c3_prompt_injection.py` - Prompt injection hardening (34 tests)
 - `tests/test_validate_operation.py` - Task agent validation workflow (23 tests)
 - `tests/test_approver.py` - Integration tests (18 tests)
 - `tests/conftest.py` - Shared fixtures and test data
@@ -304,7 +305,8 @@ Edit `~/.claude/trusted-scripts.json` directly or use `claude-trust` CLI. The st
 - `mock_env_vars` - Sets up test environment variables
 - `dangerous_bash_commands` - Collection of commands that should be denied
 - `safe_*_commands` - Collections of safe commands (git, test, lint, build, info, install)
-- `mock_anthropic_response` - Factory for mocking AI responses
+- `mock_anthropic_response` - Factory for mocking AI text responses (legacy)
+- `mock_anthropic_tool_use_response` - Factory for mocking AI tool_use responses (current)
 
 **Markers:**
 - `@pytest.mark.unit` - Unit tests for individual components

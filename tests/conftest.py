@@ -301,6 +301,43 @@ def mock_anthropic_response():
 
 
 @pytest.fixture
+def mock_anthropic_tool_use_response():
+    """Factory for creating mock Anthropic tool_use responses (structured output)."""
+
+    def _create_response(
+        decision: str = "approve",
+        category: str = "benign",
+        reasoning: str = "Test reasoning",
+        confidence: float = 0.9,
+        suggested_message: str | None = None,
+    ):
+        """Create a mock Anthropic response using tool_use blocks."""
+        input_data = {
+            "decision": decision,
+            "category": category,
+            "reasoning": reasoning,
+            "confidence": confidence,
+        }
+        if suggested_message:
+            input_data["suggested_message"] = suggested_message
+
+        class MockToolUseBlock:
+            def __init__(self, tool_input):
+                self.type = "tool_use"
+                self.name = "security_evaluation"
+                self.input = tool_input
+
+        class MockMessage:
+            def __init__(self, content, stop_reason="tool_use"):
+                self.content = content
+                self.stop_reason = stop_reason
+
+        return MockMessage([MockToolUseBlock(input_data)])
+
+    return _create_response
+
+
+@pytest.fixture
 def mock_anthropic_response_with_markdown():
     """Factory for creating mock Anthropic responses wrapped in markdown."""
 
