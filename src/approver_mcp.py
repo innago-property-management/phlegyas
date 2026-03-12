@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -52,7 +53,7 @@ PENDING_TTL_SECONDS = int(os.getenv("PENDING_TTL_SECONDS", "1800"))  # 30 min de
 PENDING_MAX_SIZE = int(os.getenv("PENDING_MAX_SIZE", "100"))
 
 # Cache metrics (reset each session — MCP server is episodic, not always-on)
-cache_metrics = {"hits": 0, "misses": 0, "evictions": 0}
+cache_metrics = {"hits": 0, "misses": 0, "expired": 0, "evictions": 0}
 
 
 class PendingApproval:
@@ -155,8 +156,6 @@ enable_audit_log = os.getenv("ENABLE_AUDIT_LOG", "true").lower() == "true"
 audit_log_file = os.getenv("AUDIT_LOG_FILE", "audit.jsonl")
 
 
-import re
-
 # Patterns for masking sensitive values in audit logs
 _SENSITIVE_PATTERNS = [
     re.compile(r"(password\s*=\s*)(\S+)", re.IGNORECASE),
@@ -171,20 +170,24 @@ _SENSITIVE_PATTERNS = [
 ]
 
 
+def _sanitize_value(value: Any) -> Any:
+    """Recursively mask sensitive patterns in a value."""
+    if isinstance(value, str):
+        masked = value
+        for pattern in _SENSITIVE_PATTERNS:
+            masked = pattern.sub(lambda m: m.group(1) + "***REDACTED***", masked)
+        return masked
+    elif isinstance(value, dict):
+        return {k: _sanitize_value(v) for k, v in value.items()}
+    elif isinstance(value, list | tuple):
+        sanitized = [_sanitize_value(item) for item in value]
+        return type(value)(sanitized)
+    return value
+
+
 def sanitize_for_audit(input_data: dict[str, Any]) -> dict[str, Any]:
     """Mask sensitive values in input data before writing to audit log."""
-    sanitized = {}
-    for key, value in input_data.items():
-        if isinstance(value, str):
-            masked = value
-            for pattern in _SENSITIVE_PATTERNS:
-                masked = pattern.sub(lambda m: m.group(1) + "***REDACTED***", masked)
-            sanitized[key] = masked
-        elif isinstance(value, dict):
-            sanitized[key] = sanitize_for_audit(value)
-        else:
-            sanitized[key] = value
-    return sanitized
+    return _sanitize_value(input_data)
 
 
 def write_audit_log(
@@ -247,7 +250,7 @@ def get_cached_decision(operation_hash: str) -> tuple[str, Any, datetime] | None
     # Check if cache entry is expired
     if datetime.now(UTC) - timestamp > timedelta(seconds=CACHE_TTL_SECONDS):
         del approval_cache[operation_hash]
-        cache_metrics["misses"] += 1
+        cache_metrics["expired"] += 1
         logger.debug(f"Cache entry expired for hash {operation_hash[:8]}...")
         return None
 
@@ -749,6 +752,7 @@ async def handle_get_approval_stats(arguments: dict[str, Any]) -> list[TextConte
             "cache": {
                 "hits": cache_metrics["hits"],
                 "misses": cache_metrics["misses"],
+                "expired": cache_metrics["expired"],
                 "evictions": cache_metrics["evictions"],
                 "size": len(approval_cache),
                 "max_size": CACHE_MAX_SIZE,

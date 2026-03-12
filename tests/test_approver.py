@@ -392,8 +392,8 @@ class TestAuditLogSanitization:
     def test_sanitize_masks_bearer_token(self):
         from src.approver_mcp import sanitize_for_audit
 
-        result = sanitize_for_audit({"command": "curl -H 'Authorization: Bearer tok_abc123'"})
-        assert "tok_abc123" not in result["command"]
+        result = sanitize_for_audit({"command": "curl -H 'Authorization: Bearer FAKE'"})
+        assert "FAKE" not in result["command"]
         assert "REDACTED" in result["command"]
 
     def test_sanitize_masks_nested_dicts(self):
@@ -416,3 +416,18 @@ class TestAuditLogSanitization:
         result = sanitize_for_audit({"count": 42, "flag": True, "command": "ls"})
         assert result["count"] == 42
         assert result["flag"] is True
+
+    def test_sanitize_masks_secrets_in_lists(self):
+        from src.approver_mcp import sanitize_for_audit
+
+        result = sanitize_for_audit({"headers": ["Authorization: Bearer FAKE", "Accept: json"]})
+        assert "FAKE" not in str(result)
+        assert "REDACTED" in str(result)
+        assert "Accept: json" in result["headers"][1]
+
+    def test_sanitize_masks_secrets_in_tuples(self):
+        from src.approver_mcp import sanitize_for_audit
+
+        result = sanitize_for_audit({"args": ("password=secret", "safe")})
+        assert "secret" not in str(result)
+        assert isinstance(result["args"], tuple)
