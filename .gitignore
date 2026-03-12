@@ -6,3 +6,12 @@ secrets/
 __pycache__/
 *.pyc
 audit.jsonl
+fnox.toml
+.venv/
+venv/
+dist/
+*.egg-info/
+.coverage
+htmlcov/
+.pytest_cache/
+*.log

@@ -9,6 +9,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -43,11 +44,16 @@ trust_store = ScriptTrustStore()
 approval_cache = {}
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "3600"))  # 1 hour default
 CACHE_ENABLED = os.getenv("ENABLE_APPROVAL_CACHE", "true").lower() == "true"
+CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "1000"))
 
 # Pending approvals store for async human approval workflow
 # Format: {request_id: PendingApproval}
 pending_approvals: dict[str, "PendingApproval"] = {}
 PENDING_TTL_SECONDS = int(os.getenv("PENDING_TTL_SECONDS", "1800"))  # 30 min default
+PENDING_MAX_SIZE = int(os.getenv("PENDING_MAX_SIZE", "100"))
+
+# Cache metrics (reset each session — MCP server is episodic, not always-on)
+cache_metrics = {"hits": 0, "misses": 0, "expired": 0, "evictions": 0}
 
 
 class PendingApproval:
@@ -99,7 +105,7 @@ class PendingApproval:
 
 
 def cleanup_expired_pending():
-    """Remove expired pending approvals."""
+    """Remove expired pending approvals and enforce max size."""
     expired = [req_id for req_id, pending in pending_approvals.items() if pending.is_expired()]
     for req_id in expired:
         pending = pending_approvals.pop(req_id)
@@ -111,6 +117,20 @@ def cleanup_expired_pending():
             pending.tier,
             f"Approval expired after {PENDING_TTL_SECONDS}s",
             pending.confidence,
+        )
+
+    # Evict oldest if over capacity (shouldn't happen in episodic use, but defense-in-depth)
+    while len(pending_approvals) > PENDING_MAX_SIZE:
+        oldest_id = min(pending_approvals, key=lambda k: pending_approvals[k].created_at)
+        evicted = pending_approvals.pop(oldest_id)
+        logger.warning(f"Evicted pending approval (over {PENDING_MAX_SIZE} limit): {oldest_id}")
+        write_audit_log(
+            evicted.tool_name,
+            evicted.input_data,
+            "evicted",
+            evicted.tier,
+            f"Evicted: pending queue over {PENDING_MAX_SIZE} limit",
+            evicted.confidence,
         )
 
 
@@ -136,6 +156,40 @@ enable_audit_log = os.getenv("ENABLE_AUDIT_LOG", "true").lower() == "true"
 audit_log_file = os.getenv("AUDIT_LOG_FILE", "audit.jsonl")
 
 
+# Patterns for masking sensitive values in audit logs
+_SENSITIVE_PATTERNS = [
+    re.compile(r"(password\s*=\s*)(\S+)", re.IGNORECASE),
+    re.compile(r"(secret\s*=\s*)(\S+)", re.IGNORECASE),
+    re.compile(r"(api[_-]?key\s*=?\s*)(\S+)", re.IGNORECASE),
+    re.compile(r"(AWS_SECRET\S*\s*=?\s*)(\S+)", re.IGNORECASE),
+    re.compile(r"(ANTHROPIC_API_KEY\s*=?\s*)(\S+)", re.IGNORECASE),
+    re.compile(r"(Bearer\s+)(\S+)", re.IGNORECASE),
+    re.compile(r"(sk-ant-\S{4})\S+", re.IGNORECASE),
+    re.compile(r"(xoxb-\S{4})\S+", re.IGNORECASE),
+    re.compile(r"(token\s*=\s*)(\S+)", re.IGNORECASE),
+]
+
+
+def _sanitize_value(value: Any) -> Any:
+    """Recursively mask sensitive patterns in a value."""
+    if isinstance(value, str):
+        masked = value
+        for pattern in _SENSITIVE_PATTERNS:
+            masked = pattern.sub(lambda m: m.group(1) + "***REDACTED***", masked)
+        return masked
+    elif isinstance(value, dict):
+        return {k: _sanitize_value(v) for k, v in value.items()}
+    elif isinstance(value, list | tuple):
+        sanitized = [_sanitize_value(item) for item in value]
+        return type(value)(sanitized)
+    return value
+
+
+def sanitize_for_audit(input_data: dict[str, Any]) -> dict[str, Any]:
+    """Mask sensitive values in input data before writing to audit log."""
+    return _sanitize_value(input_data)
+
+
 def write_audit_log(
     tool_name: str,
     input_data: dict[str, Any],
@@ -144,14 +198,14 @@ def write_audit_log(
     reason: str,
     confidence: float | None = None,
 ):
-    """Write decision to audit log."""
+    """Write decision to audit log. Sensitive values are masked."""
     if not enable_audit_log:
         return
 
     log_entry = {
         "timestamp": datetime.now(UTC).isoformat(),
         "tool_name": tool_name,
-        "input": input_data,
+        "input": sanitize_for_audit(input_data),
         "decision": decision,
         "tier": tier,
         "reason": reason,
@@ -188,32 +242,36 @@ def get_cached_decision(operation_hash: str) -> tuple[str, Any, datetime] | None
         return None
 
     if operation_hash not in approval_cache:
+        cache_metrics["misses"] += 1
         return None
 
     decision, evaluation, timestamp = approval_cache[operation_hash]
 
     # Check if cache entry is expired
     if datetime.now(UTC) - timestamp > timedelta(seconds=CACHE_TTL_SECONDS):
-        # Remove expired entry
         del approval_cache[operation_hash]
+        cache_metrics["expired"] += 1
         logger.debug(f"Cache entry expired for hash {operation_hash[:8]}...")
         return None
 
+    cache_metrics["hits"] += 1
     logger.debug(f"Cache hit for hash {operation_hash[:8]}...")
     return decision, evaluation, timestamp
 
 
 def cache_decision(operation_hash: str, decision: str, evaluation: Any):
     """
-    Cache a Tier 3 decision for future use.
-
-    Args:
-        operation_hash: Hash of the operation
-        decision: The decision (allow/deny/ask_user)
-        evaluation: The EvaluationResult object
+    Cache a Tier 3 decision for future use. Evicts oldest entry if at capacity.
     """
     if not CACHE_ENABLED:
         return
+
+    # Evict oldest entry if at capacity
+    if len(approval_cache) >= CACHE_MAX_SIZE:
+        oldest_key = min(approval_cache, key=lambda k: approval_cache[k][2])
+        del approval_cache[oldest_key]
+        cache_metrics["evictions"] += 1
+        logger.debug(f"Cache evicted oldest entry (size was {CACHE_MAX_SIZE})")
 
     approval_cache[operation_hash] = (decision, evaluation, datetime.now(UTC))
     logger.debug(
@@ -691,6 +749,18 @@ async def handle_get_approval_stats(arguments: dict[str, Any]) -> list[TextConte
             "denied": 0,
             "by_tier": {},
             "by_tool": {},
+            "cache": {
+                "hits": cache_metrics["hits"],
+                "misses": cache_metrics["misses"],
+                "expired": cache_metrics["expired"],
+                "evictions": cache_metrics["evictions"],
+                "size": len(approval_cache),
+                "max_size": CACHE_MAX_SIZE,
+            },
+            "pending": {
+                "count": len(pending_approvals),
+                "max_size": PENDING_MAX_SIZE,
+            },
         }
 
         with open(audit_log_file) as f:
