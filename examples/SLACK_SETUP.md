@@ -88,7 +88,7 @@ pip install slack-sdk>=3.31.0
 
 ## Step 8: Integrate with Approver
 
-Update `src/approver.py` to use Slack for `ask_user` decisions:
+Update `src/approver_mcp.py` to use Slack for `ask_user` decisions:
 
 ```python
 from examples.slack_integration import SlackApprovalService
@@ -150,7 +150,7 @@ async def permissions__approve(toolName: str, input: dict[str, Any]) -> dict[str
 ```bash
 cd /path/to/claude-permission-approver
 source .venv/bin/activate
-python src/approver.py
+python src/approver_mcp.py
 ```
 
 2. Trigger a high-risk operation via Claude Code:
@@ -238,5 +238,5 @@ Input:
 ## Support
 
 For issues or questions:
-- GitHub: https://github.com/yourusername/claude-permission-approver/issues
+- GitHub: https://github.com/innago-property-management/claude-permission-approver/issues
 - Documentation: See `examples/slack_integration.py` for implementation details

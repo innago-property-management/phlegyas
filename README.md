@@ -36,7 +36,7 @@ This permission-prompt-tool MCP server acts as a centralized approval system tha
 
 ```bash
 # Clone the repository
-git clone https://github.com/yourusername/claude-permission-approver.git
+git clone https://github.com/innago-property-management/claude-permission-approver.git
 cd claude-permission-approver
 
 # Create virtual environment
@@ -79,7 +79,7 @@ Add to your `~/.claude/mcp-servers.json`:
   "mcpServers": {
     "permission-approver": {
       "command": "python",
-      "args": ["/path/to/claude-permission-approver/src/approver.py"],
+      "args": ["/path/to/claude-permission-approver/src/approver_mcp.py"],
       "env": {
         "ANTHROPIC_API_KEY": "sk-ant-your-key-here",
         "PROJECT_NAME": "Your Project Name",
@@ -225,6 +225,18 @@ Input: {"file_path": "/etc/app/config.yaml", "content": "..."}
 # Final: DENIED (pending human approval)
 ```
 
+## MCP Tools
+
+The server exposes five tools:
+
+| Tool | Purpose |
+|------|---------|
+| `permissions__approve` | Main permission gate — returns `allow`/`deny` for Claude Code's `--permission-prompt-tool` flag |
+| `validate_operation` | Pre-flight check for Task agents — returns `approved`/`denied`/`pending` with request IDs |
+| `submit_approval` | Human decision submission for pending approvals (approve or deny by `request_id`) |
+| `get_pending_approvals` | List pending approvals awaiting human decision (filterable by `workflow_id`/`agent_id`) |
+| `get_approval_stats` | Audit log statistics (totals, by-tier, by-tool breakdowns) |
+
 ## Audit Logging
 
 All decisions are logged to `audit.jsonl` in JSONL format:
@@ -243,10 +255,10 @@ All decisions are logged to `audit.jsonl` in JSONL format:
 
 **View statistics:**
 
-```python
-from src.approver import get_approval_stats
-stats = await get_approval_stats()
-print(stats)
+Use the `get_approval_stats` MCP tool, or query the audit log directly:
+
+```bash
+cat audit.jsonl | jq '.'
 ```
 
 Output:
@@ -287,6 +299,9 @@ Output:
 | `PROJECT_NAME` | `Unknown` | Your project name (improves AI context) |
 | `PROJECT_TYPE` | `Software project` | Project type (e.g., "C# microservices") |
 | `CURRENT_TASK` | `Development work` | Current task description |
+| `CACHE_TTL_SECONDS` | `3600` | TTL for Tier 3 decision cache (seconds) |
+| `ENABLE_APPROVAL_CACHE` | `true` | Enable caching of Tier 3 decisions |
+| `PENDING_TTL_SECONDS` | `1800` | TTL for pending human approvals (seconds) |
 
 ### Model Selection
 
@@ -318,10 +333,12 @@ pytest tests/test_tier3_ai.py -v
 pytest tests/ --cov=src --cov-report=html
 ```
 
-**Test suite: 158 tests (84% passing)**
-- Tier 1: 33 tests (dangerous patterns)
-- Tier 2: 70 tests (safe operations)
-- Tier 3: 37 tests (AI evaluation)
+**Test suite: 233 tests (100% passing)**
+- Tier 1: 32 tests (dangerous patterns)
+- Tier 2: 79 tests (safe operations)
+- Tier 2.5: 27 tests (script trust store)
+- Tier 3: 33 tests (AI evaluation)
+- Validate Operation: 23 tests (Task agent workflow)
 - Integration: 18 tests (end-to-end)
 
 ## Performance & Cost
@@ -364,6 +381,9 @@ Is it dangerous? --> YES --> Deny immediately (Tier 1)
 Is it safe? --> YES --> Approve immediately (Tier 2)
         |
         v NO
+Is it a trusted script? --> YES (hash matches) --> Approve (Tier 2.5)
+        |
+        v NO / hash mismatch
 Ask Claude AI to evaluate (Tier 3)
         |
         v
@@ -373,10 +393,10 @@ AI says "approve"? --> Approve with reasoning
 AI says "deny"? --> Deny with reasoning
         |
         v
-AI says "ask_user"? --> Escalate to Slack (or deny if no Slack)
+AI says "ask_user"? --> Park as pending (or deny if no escalation)
         |
         v
-Human approves/denies --> Return decision
+Human submit_approval --> Return decision
 ```
 
 ## Troubleshooting

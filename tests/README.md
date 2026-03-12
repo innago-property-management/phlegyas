@@ -7,15 +7,17 @@ This directory contains a comprehensive test suite for the claude-permission-app
 ```
 tests/
 ├── conftest.py                    # Shared fixtures and test configuration
-├── test_tier1_dangerous.py        # Tests for dangerous pattern detection (33 tests)
-├── test_tier2_safe.py            # Tests for safe operation auto-approval (70 tests)
-├── test_tier3_ai.py              # Tests for AI evaluation (37 tests)
-└── test_approver.py              # Integration tests (18 tests)
+├── test_tier1_dangerous.py        # Tests for dangerous pattern detection (32 tests)
+├── test_tier2_safe.py             # Tests for safe operation auto-approval (79 tests)
+├── test_tier2_5_trust.py          # Tests for script trust store (27 tests)
+├── test_tier3_ai.py               # Tests for AI evaluation (33 tests)
+├── test_validate_operation.py     # Tests for Task agent validation workflow (23 tests)
+└── test_approver.py               # Integration tests (18 tests)
 ```
 
 ## Test Categories
 
-### Tier 1: Dangerous Pattern Detection (33 tests)
+### Tier 1: Dangerous Pattern Detection (32 tests)
 Tests that verify dangerous operations are correctly identified and blocked:
 - Destructive bash commands (rm -rf, DROP TABLE, etc.)
 - Production environment operations
@@ -23,18 +25,31 @@ Tests that verify dangerous operations are correctly identified and blocked:
 - Dangerous git operations (push --force, reset --hard)
 - Network DELETE operations
 
-### Tier 2: Safe Operation Auto-Approval (70 tests)
+### Tier 2: Safe Operation Auto-Approval (79 tests)
 Tests that verify safe operations are correctly identified and auto-approved:
 - Read-only tools (Read, Glob, Grep, WebFetch, WebSearch, Firecrawl, JetBrains)
-- Safe git operations (status, log, diff, feature branches)
-- Test commands (npm test, pytest, etc.)
-- Linting and formatting (eslint, black, prettier)
-- Build commands (npm build, cargo build, etc.)
-- Info commands (ls, cat, grep)
-- Package installation (npm install, pip install)
+- Safe git operations (status, log, diff, feature branches, commit, add, stash)
+- Test commands (npm test, pytest, go test, mvn test, gradle test, etc.)
+- Linting and formatting (eslint, black, prettier, ruff, rustfmt)
+- Build commands (npm build, cargo build, dotnet build, go build, etc.)
+- Info commands (ls, cat, grep, find, ps, env, brew, gh, jq, awk, sed, etc.)
+- Package installation (npm install, pip install, yarn add, dotnet restore)
 - Web research (curl, wget)
+- macOS utilities (icalBuddy, remindctl, sw_vers)
+- gh api GET-only requests (mutating methods blocked)
+- python -c deliberately excluded (falls to Tier 3)
 
-### Tier 3: AI Evaluation (37 tests)
+### Tier 2.5: Script Trust Store (27 tests)
+Tests for TOFU (Trust On First Use) script approval:
+- Trust, revoke, list, verify operations
+- SHA-256 content hash matching and mismatch detection
+- Script path detection (bash, sh, direct execution)
+- Tier 1 dangerous patterns still block trusted scripts
+- on_change callback firing
+- File permission enforcement (0600)
+- Disk persistence
+
+### Tier 3: AI Evaluation (33 tests)
 Tests for AI-powered evaluation of ambiguous operations:
 - Initialization and configuration
 - Prompt building with project context
@@ -42,6 +57,15 @@ Tests for AI-powered evaluation of ambiguous operations:
 - Confidence threshold application
 - Critical operation escalation
 - Error handling
+- python -c and gh api mutation rejection
+
+### Validate Operation (23 tests)
+Tests for the Task agent validation workflow:
+- Tier 1/2/2.5/3 routing via validate_operation tool
+- Response format (status, tier, reason, confidence, request_id)
+- Pending approval lifecycle and TTL
+- Audit log integration
+- Edge cases (empty input, unknown tools)
 
 ### Integration Tests (18 tests)
 End-to-end tests for the complete approval system:
@@ -226,11 +250,8 @@ def test_production_patterns(self):
 
 ## Current Test Status
 
-**Total Tests:** 158
-**Passing:** 133 (84%)
-**Failing:** 25 (16%)
-
-See `TEST_RUN_REPORT.md` in the project root for detailed test results and failure analysis.
+**Total Tests:** 233 (includes parametrized variants)
+**Passing:** 233 (100%)
 
 ## Continuous Integration
 
