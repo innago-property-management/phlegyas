@@ -108,7 +108,7 @@ async def permissions__approve(
     """
 
     logger.info(f"Permission request: {tool_name}")
-    logger.debug(f"Input: {json.dumps(input, indent=2)}")
+    logger.debug(f"Input keys: {list(input.keys())}")
 
     # Tier 1: Check for dangerous patterns (highest priority)
     is_dangerous, dangerous_reason = dangerous_detector.is_dangerous(tool_name, input)

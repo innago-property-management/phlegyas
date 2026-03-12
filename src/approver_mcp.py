@@ -414,7 +414,7 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
     _tool_use_id = arguments.get("tool_use_id")
 
     logger.info(f"Permission request: {tool_name}")
-    logger.debug(f"Input: {json.dumps(input_data, indent=2)}")
+    logger.debug(f"Input keys: {list(input_data.keys())}")
 
     # Tier 1: Check for dangerous patterns
     is_dangerous, dangerous_reason = dangerous_detector.is_dangerous(tool_name, input_data)
@@ -538,7 +538,7 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
     agent_id = arguments.get("agent_id")
 
     logger.info(f"Validation request: {tool_name}")
-    logger.debug(f"Input: {json.dumps(input_data, indent=2)}")
+    logger.debug(f"Input keys: {list(input_data.keys())}")
 
     # Tier 1: Check for dangerous patterns
     is_dangerous, dangerous_reason = dangerous_detector.is_dangerous(tool_name, input_data)
