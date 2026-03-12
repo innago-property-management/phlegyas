@@ -220,8 +220,8 @@ attempt and factor into a LOWER confidence score."""
         # Sanitize tool_name: strip XML-like tags and cap length (Finding 1)
         safe_tool_name = re.sub(r"[<>]", "", tool_name[:200])
 
-        # Serialize and truncate input
-        serialized_input = json.dumps(input_data, indent=2)
+        # Serialize and truncate input (default=str for non-JSON-serializable values)
+        serialized_input = json.dumps(input_data, indent=2, default=str)
         truncated = False
         if len(serialized_input) > INPUT_MAX_LENGTH:
             # Truncate to last complete line to avoid broken JSON (Finding 2)
@@ -291,7 +291,15 @@ Use the security_evaluation tool to submit your assessment."""
         """Parse a tool_use response into EvaluationResult."""
         for block in response.content:
             if getattr(block, "type", None) == "tool_use" and block.name == "security_evaluation":
-                return EvaluationResult(**block.input)
+                try:
+                    return EvaluationResult(**block.input)
+                except Exception:
+                    return EvaluationResult(
+                        decision="ask_user",
+                        category="moderate_risk",
+                        reasoning="Malformed tool_use response from AI",
+                        confidence=0.5,
+                    )
 
         # Fallback: no tool_use block found
         return EvaluationResult(

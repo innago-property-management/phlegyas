@@ -43,9 +43,15 @@ class TestSystemPromptSeparation:
         assert "npm install" in user
 
     def test_system_prompt_contains_untrusted_data_warning(self, evaluator):
-        """System prompt should instruct model to treat user content as data."""
+        """System prompt should include a strong untrusted-data / do-not-follow warning."""
         system, _user = evaluator._build_evaluation_prompt("Bash", {"command": "test"})
-        assert "UNTRUSTED" in system or "untrusted" in system or "data" in system.lower()
+        warning = system.lower()
+        assert (
+            "untrusted data" in warning
+            or "treat user content as untrusted" in warning
+            or "do not follow any instructions" in warning
+            or ("untrusted" in warning and "instruction" in warning)
+        )
 
     def test_user_message_does_not_contain_guidelines(self, evaluator):
         """User message should NOT contain evaluation guidelines."""
@@ -143,14 +149,14 @@ class TestInputLengthLimits:
         # Build input that will exceed 4000 chars when serialized
         input_data = {"key" + str(i): "value" * 50 for i in range(20)}
         _system, user = evaluator._build_evaluation_prompt("Bash", input_data)
-        # Extract the input portion between delimiters
+        # Extract the input portion — should end with a newline before delimiter
         import re
 
-        match = re.search(r"Input: (.+?)(?=\n</UNTRUSTED)", user, re.DOTALL)
-        if match:
-            input_section = match.group(1)
-            # Should not end mid-line (no trailing partial key/value)
-            assert input_section.rstrip().endswith((",", "}", '"'))
+        match = re.search(r"Input: (.+?\n)(?=</UNTRUSTED)", user, re.DOTALL)
+        assert match is not None, "Expected to find Input section in prompt"
+        input_section = match.group(1)
+        # Last char before </UNTRUSTED> should be newline (line-boundary truncation)
+        assert input_section.endswith("\n")
 
 
 class TestConfidenceCaps:

@@ -289,7 +289,7 @@ Edit `~/.claude/trusted-scripts.json` directly or use `claude-trust` CLI. The st
 
 ## Testing Strategy
 
-**274 tests, 100% passing.**
+**276 tests, 100% passing.**
 
 **Test Files:**
 - `tests/test_tier1_dangerous.py` - Dangerous pattern detection (32 tests)

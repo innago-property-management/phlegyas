@@ -137,6 +137,45 @@ class TestAIEvaluator:
         assert result.category == "moderate_risk"
         assert result.confidence == 0.5
 
+    def test_should_parse_mixed_text_and_tool_use_response(
+        self, evaluator, mock_anthropic_tool_use_response
+    ):
+        """Should parse tool_use from mixed text+tool_use response (real API shape)."""
+
+        class MockTextBlock:
+            type = "text"
+            text = "Let me evaluate this operation."
+
+        # Get a tool_use response and prepend a text block
+        base_response = mock_anthropic_tool_use_response(
+            decision="approve", category="benign", reasoning="Safe", confidence=0.92
+        )
+
+        class MockMixedResponse:
+            def __init__(self, content):
+                self.content = content
+
+        mixed = MockMixedResponse([MockTextBlock()] + base_response.content)
+        result = evaluator._parse_tool_use_response(mixed)
+        assert result.decision == "approve"
+        assert result.confidence == 0.92
+
+    def test_should_handle_malformed_tool_use_input(self, evaluator):
+        """Should return conservative ask_user when tool_use input is malformed."""
+
+        class MockBadToolUseBlock:
+            type = "tool_use"
+            name = "security_evaluation"
+            input = {"decision": "approve"}  # Missing required fields
+
+        class MockResponse:
+            content = [MockBadToolUseBlock()]
+
+        result = evaluator._parse_tool_use_response(MockResponse())
+        assert result.decision == "ask_user"
+        assert result.category == "moderate_risk"
+        assert "malformed" in result.reasoning.lower() or "Malformed" in result.reasoning
+
     def test_should_parse_suggested_message_from_tool_use(
         self, evaluator, mock_anthropic_tool_use_response
     ):
