@@ -95,9 +95,9 @@ class TestPermissionApprovalFlow:
         assert "safe git operation" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_tier3_evaluates_ambiguous_operations(self, mock_anthropic_response):
+    async def test_tier3_evaluates_ambiguous_operations(self, mock_anthropic_tool_use_response):
         """Tier 3 should use AI for ambiguous operations."""
-        mock_response = mock_anthropic_response(
+        mock_response = mock_anthropic_tool_use_response(
             decision="approve",
             category="moderate_risk",
             reasoning="Safe edit",

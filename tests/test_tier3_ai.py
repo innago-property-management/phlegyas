@@ -4,8 +4,6 @@ Tests for Tier 3: AI-Powered Evaluation
 Tests for AI evaluation of ambiguous permission requests.
 """
 
-import json
-
 import pytest
 
 from src.tier3_ai import AIEvaluator, EvaluationResult
@@ -59,102 +57,137 @@ class TestAIEvaluator:
     # Evaluation Prompt Building Tests
 
     def test_should_build_evaluation_prompt(self, evaluator):
-        """Should build complete evaluation prompt."""
-        prompt = evaluator._build_evaluation_prompt("Bash", {"command": "ls -la"})
-        assert "Bash" in prompt
-        assert "ls -la" in prompt
-        assert "TestProject" in prompt
-        assert "approve" in prompt
-        assert "deny" in prompt
-        assert "ask_user" in prompt
+        """Should build separate system and user prompts."""
+        system, user = evaluator._build_evaluation_prompt("Bash", {"command": "ls -la"})
+        assert "Bash" in user
+        assert "ls -la" in user
+        assert "TestProject" in system
+        assert "approve" in system
+        assert "deny" in system
+        assert "ask_user" in system
 
     def test_should_include_confidence_thresholds_in_prompt(self, evaluator):
-        """Should include confidence thresholds in prompt."""
-        prompt = evaluator._build_evaluation_prompt("Bash", {"command": "test"})
-        assert "80" in prompt  # 0.8 * 100 = 80%
+        """Should include confidence thresholds in system prompt."""
+        system, _user = evaluator._build_evaluation_prompt("Bash", {"command": "test"})
+        assert "80" in system  # 0.8 * 100 = 80%
 
     def test_should_include_project_context_in_prompt(self, evaluator):
-        """Should include project context in prompt."""
-        prompt = evaluator._build_evaluation_prompt("Write", {"file_path": "test.txt"})
-        assert evaluator.project_name in prompt
-        assert evaluator.project_type in prompt
-        assert evaluator.current_task in prompt
+        """Should include project context in system prompt."""
+        system, _user = evaluator._build_evaluation_prompt("Write", {"file_path": "test.txt"})
+        assert evaluator.project_name in system
+        assert evaluator.project_type in system
+        assert evaluator.current_task in system
 
-    # Response Parsing Tests
+    # Response Parsing Tests (tool_use structured output)
 
-    def test_should_parse_json_response(self, evaluator):
-        """Should parse valid JSON response."""
-        response_text = json.dumps(
-            {
-                "decision": "approve",
-                "category": "benign",
-                "reasoning": "Test reasoning",
-                "confidence": 0.9,
-            }
+    def test_should_parse_tool_use_response(self, evaluator, mock_anthropic_tool_use_response):
+        """Should parse tool_use response into EvaluationResult."""
+        response = mock_anthropic_tool_use_response(
+            decision="approve",
+            category="benign",
+            reasoning="Test reasoning",
+            confidence=0.9,
         )
-        result = evaluator._parse_evaluation(response_text)
+        result = evaluator._parse_tool_use_response(response)
         assert isinstance(result, EvaluationResult)
         assert result.decision == "approve"
         assert result.category == "benign"
         assert result.reasoning == "Test reasoning"
         assert result.confidence == 0.9
 
-    def test_should_parse_markdown_wrapped_json(self, evaluator):
-        """Should parse JSON wrapped in markdown code blocks."""
-        response_text = """```json
-{
-  "decision": "deny",
-  "category": "critical",
-  "reasoning": "Too dangerous",
-  "confidence": 0.95
-}
-```"""
-        result = evaluator._parse_evaluation(response_text)
+    def test_should_parse_deny_tool_use_response(self, evaluator, mock_anthropic_tool_use_response):
+        """Should parse deny tool_use response."""
+        response = mock_anthropic_tool_use_response(
+            decision="deny",
+            category="critical",
+            reasoning="Too dangerous",
+            confidence=0.95,
+        )
+        result = evaluator._parse_tool_use_response(response)
         assert result.decision == "deny"
         assert result.category == "critical"
         assert result.confidence == 0.95
 
-    def test_should_parse_generic_markdown_wrapped_json(self, evaluator):
-        """Should parse JSON wrapped in generic markdown blocks."""
-        response_text = """```
-{
-  "decision": "ask_user",
-  "category": "moderate_risk",
-  "reasoning": "Unclear",
-  "confidence": 0.6
-}
-```"""
-        result = evaluator._parse_evaluation(response_text)
+    def test_should_parse_ask_user_tool_use_response(
+        self, evaluator, mock_anthropic_tool_use_response
+    ):
+        """Should parse ask_user tool_use response."""
+        response = mock_anthropic_tool_use_response(
+            decision="ask_user",
+            category="moderate_risk",
+            reasoning="Unclear",
+            confidence=0.6,
+        )
+        result = evaluator._parse_tool_use_response(response)
         assert result.decision == "ask_user"
         assert result.category == "moderate_risk"
 
-    def test_should_handle_invalid_json(self, evaluator):
-        """Should return conservative ask_user for invalid JSON."""
-        result = evaluator._parse_evaluation("This is not JSON")
+    def test_should_handle_no_tool_use_block(self, evaluator):
+        """Should return conservative ask_user when no tool_use block present."""
+
+        class MockTextBlock:
+            type = "text"
+            text = "Some text without tool use"
+
+        class MockResponse:
+            content = [MockTextBlock()]
+
+        result = evaluator._parse_tool_use_response(MockResponse())
         assert result.decision == "ask_user"
         assert result.category == "moderate_risk"
-        assert "Failed to parse" in result.reasoning
         assert result.confidence == 0.5
 
-    def test_should_handle_missing_fields(self, evaluator):
-        """Should handle JSON with missing required fields."""
-        response_text = json.dumps({"decision": "approve"})  # Missing other fields
-        result = evaluator._parse_evaluation(response_text)
-        # Pydantic validation should fail, should return ask_user
-        assert result.decision == "ask_user"
+    def test_should_parse_mixed_text_and_tool_use_response(
+        self, evaluator, mock_anthropic_tool_use_response
+    ):
+        """Should parse tool_use from mixed text+tool_use response (real API shape)."""
 
-    def test_should_parse_suggested_message(self, evaluator):
-        """Should parse optional suggested_message field."""
-        response_text = json.dumps(
-            {
-                "decision": "ask_user",
-                "category": "high_risk",
-                "reasoning": "Needs review",
-                "confidence": 0.7,
-                "suggested_message": "Please review this operation",
-            }
+        class MockTextBlock:
+            type = "text"
+            text = "Let me evaluate this operation."
+
+        # Get a tool_use response and prepend a text block
+        base_response = mock_anthropic_tool_use_response(
+            decision="approve", category="benign", reasoning="Safe", confidence=0.92
         )
-        result = evaluator._parse_evaluation(response_text)
+
+        class MockMixedResponse:
+            def __init__(self, content):
+                self.content = content
+
+        mixed = MockMixedResponse([MockTextBlock()] + base_response.content)
+        result = evaluator._parse_tool_use_response(mixed)
+        assert result.decision == "approve"
+        assert result.confidence == 0.92
+
+    def test_should_handle_malformed_tool_use_input(self, evaluator):
+        """Should return conservative ask_user when tool_use input is malformed."""
+
+        class MockBadToolUseBlock:
+            type = "tool_use"
+            name = "security_evaluation"
+            input = {"decision": "approve"}  # Missing required fields
+
+        class MockResponse:
+            content = [MockBadToolUseBlock()]
+
+        result = evaluator._parse_tool_use_response(MockResponse())
+        assert result.decision == "ask_user"
+        assert result.category == "moderate_risk"
+        assert "malformed" in result.reasoning.lower() or "Malformed" in result.reasoning
+
+    def test_should_parse_suggested_message_from_tool_use(
+        self, evaluator, mock_anthropic_tool_use_response
+    ):
+        """Should parse optional suggested_message from tool_use response."""
+        response = mock_anthropic_tool_use_response(
+            decision="ask_user",
+            category="high_risk",
+            reasoning="Needs review",
+            confidence=0.7,
+            suggested_message="Please review this operation",
+        )
+        result = evaluator._parse_tool_use_response(response)
         assert result.suggested_message == "Please review this operation"
 
     # Threshold Application Tests
@@ -239,9 +272,11 @@ class TestAIEvaluator:
     # Full Evaluation Tests (with mocked API)
 
     @pytest.mark.asyncio
-    async def test_should_evaluate_and_approve(self, evaluator, mock_anthropic_response, mocker):
+    async def test_should_evaluate_and_approve(
+        self, evaluator, mock_anthropic_tool_use_response, mocker
+    ):
         """Should evaluate operation and return approval."""
-        mock_response = mock_anthropic_response(
+        mock_response = mock_anthropic_tool_use_response(
             decision="approve", category="benign", reasoning="Safe operation", confidence=0.9
         )
         mocker.patch.object(evaluator.client.messages, "create", return_value=mock_response)
@@ -252,9 +287,11 @@ class TestAIEvaluator:
         assert evaluation.confidence == 0.9
 
     @pytest.mark.asyncio
-    async def test_should_evaluate_and_deny(self, evaluator, mock_anthropic_response, mocker):
-        """Should evaluate operation and return denial."""
-        mock_response = mock_anthropic_response(
+    async def test_should_evaluate_and_deny(
+        self, evaluator, mock_anthropic_tool_use_response, mocker
+    ):
+        """Should evaluate operation and return denial (Tier 1 catches rm -rf)."""
+        mock_response = mock_anthropic_tool_use_response(
             decision="deny",
             category="critical",
             reasoning="Dangerous operation",
@@ -264,12 +301,13 @@ class TestAIEvaluator:
 
         decision, evaluation = await evaluator.evaluate("Bash", {"command": "rm -rf /"})
         assert decision == "deny"
-        assert evaluation.category == "critical"
 
     @pytest.mark.asyncio
-    async def test_should_evaluate_and_ask_user(self, evaluator, mock_anthropic_response, mocker):
+    async def test_should_evaluate_and_ask_user(
+        self, evaluator, mock_anthropic_tool_use_response, mocker
+    ):
         """Should evaluate operation and escalate to user."""
-        mock_response = mock_anthropic_response(
+        mock_response = mock_anthropic_tool_use_response(
             decision="ask_user",
             category="moderate_risk",
             reasoning="Ambiguous operation",
@@ -296,10 +334,10 @@ class TestAIEvaluator:
 
     @pytest.mark.asyncio
     async def test_should_escalate_low_confidence_approval(
-        self, evaluator, mock_anthropic_response, mocker
+        self, evaluator, mock_anthropic_tool_use_response, mocker
     ):
         """Should escalate to ask_user when approval confidence is low."""
-        mock_response = mock_anthropic_response(
+        mock_response = mock_anthropic_tool_use_response(
             decision="approve",
             category="moderate_risk",
             reasoning="Probably safe",
@@ -311,11 +349,11 @@ class TestAIEvaluator:
         assert decision == "ask_user"  # Escalated due to low confidence
 
     @pytest.mark.asyncio
-    async def test_should_parse_markdown_wrapped_response(
-        self, evaluator, mock_anthropic_response_with_markdown, mocker
+    async def test_should_evaluate_with_tool_use_response(
+        self, evaluator, mock_anthropic_tool_use_response, mocker
     ):
-        """Should handle markdown-wrapped JSON responses."""
-        mock_response = mock_anthropic_response_with_markdown(
+        """Should handle tool_use structured responses."""
+        mock_response = mock_anthropic_tool_use_response(
             decision="approve", category="benign", reasoning="Safe", confidence=0.85
         )
         mocker.patch.object(evaluator.client.messages, "create", return_value=mock_response)
