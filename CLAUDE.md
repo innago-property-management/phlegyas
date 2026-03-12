@@ -345,6 +345,8 @@ cat audit.jsonl | jq '.'
 cat audit.jsonl | jq 'select(.tier == "tier3_ai_approve")'
 ```
 
+> **Security note:** Debug logging (`LOG_LEVEL=DEBUG`) only logs input keys, never full input values. The audit log (`audit.jsonl`) applies credential masking via `_sanitize_value()`. Do not add `logger.debug` calls that dump raw `input_data` — this could expose credentials captured by process managers or log aggregation.
+
 ### Testing AI Evaluation Locally
 ```python
 from src.tier3_ai import AIEvaluator
