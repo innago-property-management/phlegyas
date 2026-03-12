@@ -126,11 +126,11 @@ pytest -m integration
 ### Running the MCP Server
 
 ```bash
-# Run directly with Python
-python src/approver.py
+# Run directly with Python (official MCP SDK)
+python src/approver_mcp.py
 
-# Test with FastMCP CLI (if installed)
-fastmcp run src/approver.py
+# Legacy FastMCP server (backup)
+python src/approver.py
 ```
 
 ### Code Quality
@@ -176,16 +176,18 @@ ruff check --fix src/ tests/
 
 ### Main Entry Point
 
-**src/approver.py:93** - `permissions__approve()` FastMCP tool
-- Accepts: `tool_name`, `input`, optional `tool_use_id`
-- Returns: `{"behavior": "allow|deny", "message": "..."}`
-- Writes audit log entries when enabled
+**src/approver_mcp.py** - Official MCP SDK server with five tools:
+- `permissions__approve` - Main permission gate (`allow`/`deny` for `--permission-prompt-tool`)
+- `validate_operation` - Pre-flight check for Task agents (`approved`/`denied`/`pending`)
+- `submit_approval` - Human decision submission for pending approvals
+- `get_pending_approvals` - List pending approvals (filterable by workflow/agent ID)
+- `get_approval_stats` - Audit log statistics
 
 ### Audit Logging
 
 **Format:** JSONL (one JSON object per line) in `audit.jsonl`
 - Fields: timestamp, tool_name, input, decision, tier, reason, confidence
-- Read via: `get_approval_stats()` tool (src/approver.py:201)
+- Read via: `get_approval_stats` MCP tool or `cat audit.jsonl | jq '.'`
 
 ## Configuration
 
@@ -201,6 +203,9 @@ ruff check --fix src/ tests/
 - `LOG_LEVEL` (default: `INFO`) - Python logging level
 - `ENABLE_AUDIT_LOG` (default: `true`) - Enable audit logging
 - `AUDIT_LOG_FILE` (default: `audit.jsonl`) - Audit log file path
+- `CACHE_TTL_SECONDS` (default: `3600`) - TTL for Tier 3 decision cache
+- `ENABLE_APPROVAL_CACHE` (default: `true`) - Enable caching of Tier 3 decisions
+- `PENDING_TTL_SECONDS` (default: `1800`) - TTL for pending human approvals
 
 **Project Context (improves AI decisions):**
 - `PROJECT_NAME` (default: `Unknown`) - Your project name
@@ -284,11 +289,14 @@ Edit `~/.claude/trusted-scripts.json` directly or use `claude-trust` CLI. The st
 
 ## Testing Strategy
 
+**233 tests, 100% passing.**
+
 **Test Files:**
-- `tests/test_tier1_dangerous.py` - Dangerous pattern detection (33 tests)
-- `tests/test_tier2_safe.py` - Safe operation detection (75 tests)
-- `tests/test_tier2_5_trust.py` - Script trust store (37 tests)
-- `tests/test_tier3_ai.py` - AI evaluation logic (37 tests)
+- `tests/test_tier1_dangerous.py` - Dangerous pattern detection (32 tests)
+- `tests/test_tier2_safe.py` - Safe operation detection (79 tests)
+- `tests/test_tier2_5_trust.py` - Script trust store (27 tests)
+- `tests/test_tier3_ai.py` - AI evaluation logic (33 tests)
+- `tests/test_validate_operation.py` - Task agent validation workflow (23 tests)
 - `tests/test_approver.py` - Integration tests (18 tests)
 - `tests/conftest.py` - Shared fixtures and test data
 
@@ -326,7 +334,7 @@ Edit `src/tier3_ai.py`:
 ```bash
 # Enable debug logging
 export LOG_LEVEL=DEBUG
-python src/approver.py
+python src/approver_mcp.py
 
 # Review audit log
 cat audit.jsonl | jq '.'
@@ -424,7 +432,8 @@ tail /Volumes/Repos/claude-permission-approver/audit.jsonl
 ## Project Dependencies
 
 **Core:**
-- `fastmcp>=0.2.0` - FastMCP framework for MCP servers
+- `mcp` - Official MCP SDK (used by `approver_mcp.py`)
+- `fastmcp>=0.2.0` - FastMCP framework (used by legacy `approver.py`)
 - `anthropic>=0.39.0` - Anthropic API client for AI evaluation
 - `pydantic>=2.0.0` - Data validation and settings management
 - `python-dotenv>=1.0.0` - Environment variable management
@@ -450,12 +459,13 @@ src/
   trust_cli.py             # CLI for managing trusted scripts (claude-trust)
 
 tests/
-  conftest.py              # Shared fixtures and test data
-  test_tier1_dangerous.py  # Tier 1 tests
-  test_tier2_safe.py       # Tier 2 tests
-  test_tier2_5_trust.py    # Tier 2.5 tests
-  test_tier3_ai.py         # Tier 3 tests
-  test_approver.py         # Integration tests
+  conftest.py                # Shared fixtures and test data
+  test_tier1_dangerous.py    # Tier 1 tests
+  test_tier2_safe.py         # Tier 2 tests
+  test_tier2_5_trust.py      # Tier 2.5 tests
+  test_tier3_ai.py           # Tier 3 tests
+  test_validate_operation.py # Validate operation (Task agent) tests
+  test_approver.py           # Integration tests
 
 audit.jsonl              # Audit log (JSONL format, gitignored)
 .env                     # Environment variables (gitignored)
