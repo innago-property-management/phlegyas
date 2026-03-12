@@ -396,7 +396,7 @@ AI says "deny"? --> Deny with reasoning
 AI says "ask_user"? --> Park as pending (or deny if no escalation)
         |
         v
-Human submit_approval --> Return decision
+Human calls submit_approval --> Return decision
 ```
 
 ## Troubleshooting
