@@ -1,5 +1,5 @@
 """
-Pytest configuration and shared fixtures for claude-permission-approver tests.
+Pytest configuration and shared fixtures for phlegyas tests.
 """
 
 import json
@@ -13,7 +13,7 @@ def _cleanup_ai_evaluator():
     """Close the module-level Anthropic client to avoid unclosed SSL socket warnings."""
     yield
     try:
-        from src.approver_mcp import ai_evaluator
+        from phlegyas.approver_mcp import ai_evaluator
 
         if ai_evaluator is not None:
             ai_evaluator.close()

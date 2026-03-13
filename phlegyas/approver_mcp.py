@@ -1,7 +1,7 @@
 """
-Claude Permission Approver - Official MCP SDK Implementation
+Phlegyas - Official MCP SDK Implementation
 
-Three-tier intelligent permission approval system using official mcp.server
+Three-tier intelligent permission gate for AI agents using official mcp.server
 """
 
 import asyncio
@@ -18,10 +18,10 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
-from src.tier1_dangerous import DangerousPatternDetector
-from src.tier2_5_trust import ScriptTrustStore
-from src.tier2_safe import SafeOperationDetector
-from src.tier3_ai import AIEvaluator
+from phlegyas.tier1_dangerous import DangerousPatternDetector
+from phlegyas.tier2_5_trust import ScriptTrustStore
+from phlegyas.tier2_safe import SafeOperationDetector
+from phlegyas.tier3_ai import AIEvaluator
 
 # Load environment variables
 load_dotenv()
@@ -280,7 +280,7 @@ def cache_decision(operation_hash: str, decision: str, evaluation: Any):
 
 
 # Create MCP server
-app = Server("claude-permission-approver")
+app = Server("phlegyas")
 
 
 @app.list_tools()
@@ -899,7 +899,7 @@ async def handle_get_pending_approvals(arguments: dict[str, Any]) -> list[TextCo
 
 async def main():
     """Run the MCP server."""
-    logger.info("Starting Claude Permission Approver MCP server...")
+    logger.info("Starting Phlegyas MCP server...")
     logger.info(f"Audit logging: {'enabled' if enable_audit_log else 'disabled'}")
     if ai_evaluator:
         logger.info(f"AI evaluation: enabled (model: {ai_evaluator.model})")

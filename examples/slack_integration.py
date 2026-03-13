@@ -38,8 +38,7 @@ import asyncio
 import json
 import logging
 import os
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from slack_sdk import WebClient
@@ -82,9 +81,7 @@ class SlackApprovalService:
 
         # Initialize clients
         self.web_client = WebClient(token=self.bot_token)
-        self.socket_client = SocketModeClient(
-            app_token=self.app_token, web_client=self.web_client
-        )
+        self.socket_client = SocketModeClient(app_token=self.app_token, web_client=self.web_client)
 
         # Track pending approvals {message_ts: Future}
         self.pending_approvals: dict[str, asyncio.Future] = {}
@@ -118,9 +115,7 @@ class SlackApprovalService:
 
         try:
             # Build approval message
-            blocks = self._build_approval_blocks(
-                tool_name, input_data, reasoning, category
-            )
+            blocks = self._build_approval_blocks(tool_name, input_data, reasoning, category)
 
             # Send message to Slack
             response = self.web_client.chat_postMessage(
@@ -144,7 +139,7 @@ class SlackApprovalService:
 
                 return decision
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 logger.warning(f"Approval request timed out after {timeout}s")
 
                 # Update message to show timeout
@@ -171,9 +166,12 @@ class SlackApprovalService:
         """Build Slack Block Kit message with approval buttons."""
 
         # Risk emoji
-        risk_emoji = {"benign": "✅", "moderate_risk": "⚠️", "high_risk": "🚨", "critical": "🔴"}.get(
-            category, "❓"
-        )
+        risk_emoji = {
+            "benign": "✅",
+            "moderate_risk": "⚠️",
+            "high_risk": "🚨",
+            "critical": "🔴",
+        }.get(category, "❓")
 
         # Format input data (truncate if too long)
         input_str = json.dumps(input_data, indent=2)
@@ -295,7 +293,9 @@ class SlackApprovalService:
 
                 # Remove action buttons
                 updated_blocks = [
-                    block for block in original_blocks if block.get("block_id") != "approval_actions"
+                    block
+                    for block in original_blocks
+                    if block.get("block_id") != "approval_actions"
                 ]
 
                 # Add decision banner
@@ -330,7 +330,7 @@ class SlackApprovalService:
 async def example_integration():
     """Example showing how to integrate Slack approval into approver.py."""
 
-    from src.tier3_ai import AIEvaluator
+    from phlegyas.tier3_ai import AIEvaluator
 
     # Initialize services
     ai_evaluator = AIEvaluator()

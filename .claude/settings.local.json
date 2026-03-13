@@ -81,7 +81,7 @@
       "Bash(source .venv/bin/activate)",
       "SlashCommand(/reload-mcp:*)",
       "Bash(cat:*)",
-      "mcp__claude-permission-approver__validate_operation",
+      "mcp__phlegyas__validate_operation",
       "Bash(git add:*)"
     ],
     "deny": [

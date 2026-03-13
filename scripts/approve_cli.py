@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-CLI for claude-permission-approver — evaluate tool permissions from the command line.
+CLI for phlegyas — evaluate tool permissions from the command line.
 
 Calls the three-tier evaluation pipeline directly (no MCP server needed).
 
@@ -21,11 +21,11 @@ import sys
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
-from src.tier1_dangerous import DangerousPatternDetector
-from src.tier2_safe import SafeOperationDetector
-from src.tier3_ai import AIEvaluator
+from phlegyas.tier1_dangerous import DangerousPatternDetector  # noqa: E402
+from phlegyas.tier2_safe import SafeOperationDetector  # noqa: E402
+from phlegyas.tier3_ai import AIEvaluator  # noqa: E402
 
 
 def build_input(tool_name: str, raw_input: str) -> dict:
@@ -159,7 +159,7 @@ def print_pretty(result: dict, tool_name: str, input_data: dict) -> None:
 
     # Exit code hint
     if decision == "deny":
-        print(f"\n  Exit code: 1")
+        print("\n  Exit code: 1")
 
 
 def main():

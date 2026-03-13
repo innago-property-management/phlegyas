@@ -13,10 +13,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.approver import write_audit_log
-from src.tier1_dangerous import DangerousPatternDetector
-from src.tier2_safe import SafeOperationDetector
-from src.tier3_ai import AIEvaluator
+from phlegyas.approver import write_audit_log
+from phlegyas.tier1_dangerous import DangerousPatternDetector
+from phlegyas.tier2_safe import SafeOperationDetector
+from phlegyas.tier3_ai import AIEvaluator
 
 
 async def evaluate_permission(
@@ -104,7 +104,7 @@ class TestPermissionApprovalFlow:
             confidence=0.85,
         )
 
-        with patch("src.tier3_ai.Anthropic") as mock_anthropic_class:
+        with patch("phlegyas.tier3_ai.Anthropic") as mock_anthropic_class:
             mock_client = MagicMock()
             mock_client.messages.create.return_value = mock_response
             mock_anthropic_class.return_value = mock_client
@@ -156,7 +156,7 @@ class TestPermissionApprovalFlow:
     @pytest.mark.asyncio
     async def test_should_handle_ai_evaluation_error(self):
         """Should deny when AI evaluation raises an exception."""
-        with patch("src.tier3_ai.Anthropic") as mock_anthropic_class:
+        with patch("phlegyas.tier3_ai.Anthropic") as mock_anthropic_class:
             mock_client = MagicMock()
             mock_client.messages.create.side_effect = Exception("API error")
             mock_anthropic_class.return_value = mock_client
@@ -178,8 +178,8 @@ class TestPermissionApprovalFlow:
         """Should write audit log entries correctly."""
         audit_file = tmp_path / "test_audit.jsonl"
 
-        with patch("src.approver.audit_log_file", str(audit_file)):
-            with patch("src.approver.enable_audit_log", True):
+        with patch("phlegyas.approver.audit_log_file", str(audit_file)):
+            with patch("phlegyas.approver.enable_audit_log", True):
                 write_audit_log(
                     tool_name="Bash",
                     input_data={"command": "ls -la"},
@@ -200,8 +200,8 @@ class TestPermissionApprovalFlow:
         """Should not write audit log when disabled."""
         audit_file = tmp_path / "test_audit.jsonl"
 
-        with patch("src.approver.audit_log_file", str(audit_file)):
-            with patch("src.approver.enable_audit_log", False):
+        with patch("phlegyas.approver.audit_log_file", str(audit_file)):
+            with patch("phlegyas.approver.enable_audit_log", False):
                 write_audit_log(
                     tool_name="Bash",
                     input_data={"command": "test"},
@@ -376,49 +376,49 @@ class TestAuditLogSanitization:
     """Tests for audit log credential masking."""
 
     def test_sanitize_masks_password(self):
-        from src.approver_mcp import sanitize_for_audit
+        from phlegyas.approver_mcp import sanitize_for_audit
 
         result = sanitize_for_audit({"command": "echo password=supersecret123"})
         assert "supersecret123" not in result["command"]
         assert "REDACTED" in result["command"]
 
     def test_sanitize_masks_api_key(self):
-        from src.approver_mcp import sanitize_for_audit
+        from phlegyas.approver_mcp import sanitize_for_audit
 
         result = sanitize_for_audit({"content": "ANTHROPIC_API_KEY=sk-ant-real-key"})
         assert "sk-ant-real-key" not in result["content"]
         assert "REDACTED" in result["content"]
 
     def test_sanitize_masks_bearer_token(self):
-        from src.approver_mcp import sanitize_for_audit
+        from phlegyas.approver_mcp import sanitize_for_audit
 
         result = sanitize_for_audit({"command": "curl -H 'Authorization: Bearer FAKE'"})
         assert "FAKE" not in result["command"]
         assert "REDACTED" in result["command"]
 
     def test_sanitize_masks_nested_dicts(self):
-        from src.approver_mcp import sanitize_for_audit
+        from phlegyas.approver_mcp import sanitize_for_audit
 
         result = sanitize_for_audit({"outer": {"inner": "password=secret"}})
         assert "secret" not in str(result)
         assert "REDACTED" in str(result)
 
     def test_sanitize_preserves_safe_values(self):
-        from src.approver_mcp import sanitize_for_audit
+        from phlegyas.approver_mcp import sanitize_for_audit
 
         result = sanitize_for_audit({"command": "git status", "file": "README.md"})
         assert result["command"] == "git status"
         assert result["file"] == "README.md"
 
     def test_sanitize_handles_non_string_values(self):
-        from src.approver_mcp import sanitize_for_audit
+        from phlegyas.approver_mcp import sanitize_for_audit
 
         result = sanitize_for_audit({"count": 42, "flag": True, "command": "ls"})
         assert result["count"] == 42
         assert result["flag"] is True
 
     def test_sanitize_masks_secrets_in_lists(self):
-        from src.approver_mcp import sanitize_for_audit
+        from phlegyas.approver_mcp import sanitize_for_audit
 
         result = sanitize_for_audit({"headers": ["Authorization: Bearer FAKE", "Accept: json"]})
         assert "FAKE" not in str(result)
@@ -426,7 +426,7 @@ class TestAuditLogSanitization:
         assert "Accept: json" in result["headers"][1]
 
     def test_sanitize_masks_secrets_in_tuples(self):
-        from src.approver_mcp import sanitize_for_audit
+        from phlegyas.approver_mcp import sanitize_for_audit
 
         result = sanitize_for_audit({"args": ("password=secret", "safe")})
         assert "secret" not in str(result)

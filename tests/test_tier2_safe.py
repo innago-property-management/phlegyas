@@ -6,7 +6,7 @@ Tests that safe operations are correctly identified and auto-approved.
 
 import pytest
 
-from src.tier2_safe import SafeOperationDetector
+from phlegyas.tier2_safe import SafeOperationDetector
 
 
 class TestSafeOperationDetector:

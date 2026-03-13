@@ -4,16 +4,16 @@ CLI for managing the Tier 2.5 Script Trust Store.
 Usage examples:
 
     # Trust a script
-    claude-trust /path/to/deploy.sh --note "nightly deploy"
+    phlegyas-trust /path/to/deploy.sh --note "nightly deploy"
 
     # List all trusted scripts
-    claude-trust --list
+    phlegyas-trust --list
 
     # Revoke trust for a script
-    claude-trust --revoke /path/to/deploy.sh
+    phlegyas-trust --revoke /path/to/deploy.sh
 
     # Verify all hashes are still valid
-    claude-trust --verify
+    phlegyas-trust --verify
 """
 
 import argparse
@@ -21,7 +21,7 @@ import json
 import sys
 from pathlib import Path
 
-from src.tier2_5_trust import ScriptTrustStore
+from phlegyas.tier2_5_trust import ScriptTrustStore
 
 
 def cmd_trust(args: argparse.Namespace, store: ScriptTrustStore) -> int:
@@ -150,7 +150,7 @@ def pieces_checkpoint(action: str, path: str, entry: dict[str, str] | None) -> N
 
         payload = json.dumps(
             {
-                "application": {"id": "claude-permission-approver"},
+                "application": {"id": "phlegyas"},
                 "text": text,
             }
         ).encode()
@@ -168,22 +168,22 @@ def pieces_checkpoint(action: str, path: str, entry: dict[str, str] | None) -> N
 def build_parser() -> argparse.ArgumentParser:
     """Build the argument parser."""
     parser = argparse.ArgumentParser(
-        prog="claude-trust",
-        description="Manage the Tier 2.5 Script Trust Store for claude-permission-approver.",
+        prog="phlegyas-trust",
+        description="Manage the Tier 2.5 Script Trust Store for phlegyas.",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 examples:
   Trust a script:
-    claude-trust /path/to/deploy.sh --note "nightly deploy script"
+    phlegyas-trust /path/to/deploy.sh --note "nightly deploy script"
 
   List all trusted scripts:
-    claude-trust --list
+    phlegyas-trust --list
 
   Revoke trust:
-    claude-trust --revoke /path/to/deploy.sh
+    phlegyas-trust --revoke /path/to/deploy.sh
 
   Verify all hashes:
-    claude-trust --verify
+    phlegyas-trust --verify
         """,
     )
 
@@ -231,7 +231,7 @@ examples:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the claude-trust CLI."""
+    """Entry point for the phlegyas-trust CLI."""
     parser = build_parser()
     args = parser.parse_args(argv)
 

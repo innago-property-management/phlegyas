@@ -72,9 +72,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install ruff
       - name: Ruff check
-        run: ruff check src/ tests/
+        run: ruff check phlegyas/ tests/
       - name: Ruff format check
-        run: ruff format --check src/ tests/
+        run: ruff format --check phlegyas/ tests/
 
   merge-checks:
     uses: innago-property-management/Oui-DELIVER/.github/workflows/merge-checks-python.yml@main

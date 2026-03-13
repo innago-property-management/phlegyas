@@ -1,6 +1,6 @@
 # Test Suite Documentation
 
-This directory contains a comprehensive test suite for the claude-permission-approver MCP server.
+This directory contains a comprehensive test suite for the phlegyas MCP server.
 
 ## Test Structure
 
@@ -105,7 +105,7 @@ pytest tests/test_tier1_dangerous.py::TestDangerousPatternDetector::test_should_
 ### Run with Coverage (if pytest-cov installed)
 ```bash
 pip install pytest-cov
-pytest tests/ --cov=src --cov-report=html --cov-report=term-missing
+pytest tests/ --cov=phlegyas --cov-report=html --cov-report=term-missing
 ```
 
 ### Run Tests Matching Pattern
@@ -158,7 +158,7 @@ The `conftest.py` file provides shared fixtures:
 ### Example Test Structure
 ```python
 import pytest
-from src.tier1_dangerous import DangerousPatternDetector
+from phlegyas.tier1_dangerous import DangerousPatternDetector
 
 class TestDangerousPatternDetector:
     """Test suite for DangerousPatternDetector."""
@@ -181,7 +181,7 @@ class TestDangerousPatternDetector:
 ### Async Test Example
 ```python
 import pytest
-from src.tier3_ai import AIEvaluator
+from phlegyas.tier3_ai import AIEvaluator
 
 class TestAIEvaluator:
     @pytest.mark.asyncio
@@ -250,8 +250,8 @@ def test_production_patterns(self):
 
 ## Current Test Status
 
-**Total Tests:** 233 (includes parametrized variants)
-**Passing:** 233 (100%)
+**Total Tests:** 276 (includes parametrized variants)
+**Passing:** 276 (100%)
 
 ## Continuous Integration
 

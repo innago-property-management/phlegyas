@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**claude-permission-approver** is a FastMCP server that provides AI-powered permission approval for Claude Code using a three-tier intelligent evaluation system. It enables autonomous multi-agent workflows by automatically approving safe operations while blocking dangerous ones.
+**phlegyas** is an MCP server that provides AI-powered permission approval for Claude Code using a three-tier intelligent evaluation system. It enables autonomous multi-agent workflows by automatically approving safe operations while blocking dangerous ones.
 
 **Core Architecture:** Three-tier evaluation pipeline
 - **Tier 1 (Dangerous):** Instant denial using regex pattern matching for destructive operations
@@ -26,7 +26,7 @@ Validate before executing:
 
 ```python
 # Before executing a potentially risky operation
-validation = await mcp__claude_permission_approver__validate_operation(
+validation = await mcp__phlegyas__validate_operation(
     tool_name="Bash",
     input={"command": "npm install new-package", "description": "Install dependency"}
 )
@@ -114,7 +114,7 @@ pytest tests/test_tier1_dangerous.py -v
 pytest tests/test_tier2_safe.py::test_safe_git_commands -v
 
 # Run with coverage
-pytest --cov=src --cov-report=html
+pytest --cov=phlegyas --cov-report=html
 
 # Run only unit tests (skip integration)
 pytest -m unit
@@ -127,22 +127,22 @@ pytest -m integration
 
 ```bash
 # Run directly with Python (official MCP SDK)
-python src/approver_mcp.py
+python phlegyas/approver_mcp.py
 
 # Legacy FastMCP server (backup)
-python src/approver.py
+python phlegyas/approver.py
 ```
 
 ### Code Quality
 ```bash
 # Format code with Black
-black src/ tests/
+black phlegyas/ tests/
 
 # Lint with Ruff
-ruff check src/ tests/
+ruff check phlegyas/ tests/
 
 # Auto-fix issues
-ruff check --fix src/ tests/
+ruff check --fix phlegyas/ tests/
 ```
 
 ## Architecture Details
@@ -151,24 +151,24 @@ ruff check --fix src/ tests/
 
 **Flow:** `permissions__approve()` → Tier 1 → Tier 2 → Tier 2.5 → Tier 3 → Decision
 
-1. **Tier 1: DangerousPatternDetector** (src/tier1_dangerous.py:12)
+1. **Tier 1: DangerousPatternDetector** (phlegyas/tier1_dangerous.py:12)
    - Regex-based pattern matching for immediate denial
    - Checks: destructive ops, production patterns, credentials, dangerous git, network ops
    - Returns: `(is_dangerous: bool, reason: str | None)`
 
-2. **Tier 2: SafeOperationDetector** (src/tier2_safe.py:12)
+2. **Tier 2: SafeOperationDetector** (phlegyas/tier2_safe.py:12)
    - Regex-based pattern matching for immediate approval
    - Checks: read-only tools, safe bash commands (git/test/lint/build/info), safe directories
    - Returns: `(is_safe: bool, category: str | None)`
 
-3. **Tier 2.5: ScriptTrustStore** (src/tier2_5_trust.py:54)
+3. **Tier 2.5: ScriptTrustStore** (phlegyas/tier2_5_trust.py:54)
    - TOFU (Trust On First Use) with SHA-256 content hashing
-   - Human trusts a script once via `claude-trust` CLI; auto-approves if hash matches
+   - Human trusts a script once via `phlegyas-trust` CLI; auto-approves if hash matches
    - Hash mismatch or missing file → falls through to Tier 3
    - Persistent store at `~/.claude/trusted-scripts.json`
    - Returns: `(is_trusted: bool, category: str | None)`
 
-4. **Tier 3: AIEvaluator** (src/tier3_ai.py:26)
+4. **Tier 3: AIEvaluator** (phlegyas/tier3_ai.py:26)
    - Claude AI evaluation for ambiguous cases
    - Uses Haiku 4.5 (default) or Sonnet models
    - Returns: `(decision: str, evaluation: EvaluationResult)` where decision is "allow", "deny", or "ask_user"
@@ -176,7 +176,7 @@ ruff check --fix src/ tests/
 
 ### Main Entry Point
 
-**src/approver_mcp.py** - Official MCP SDK server with five tools:
+**phlegyas/approver_mcp.py** - Official MCP SDK server with five tools:
 - `permissions__approve` - Main permission gate (`allow`/`deny` for `--permission-prompt-tool`)
 - `validate_operation` - Pre-flight check for Task agents (`approved`/`denied`/`pending`)
 - `submit_approval` - Human decision submission for pending approvals
@@ -254,7 +254,7 @@ The MCP permission approver works in print mode with explicit flag:
 
 ```bash
 claude -p "Your task here" \
-  --permission-prompt-tool mcp__claude-permission-approver__permissions__approve
+  --permission-prompt-tool mcp__phlegyas__permissions__approve
 ```
 
 **Note:** Task agents and interactive sessions do NOT use this flag.
@@ -263,19 +263,19 @@ claude -p "Your task here" \
 
 Trust scripts for auto-approval using content hashing (TOFU model).
 
-### CLI: `claude-trust`
+### CLI: `phlegyas-trust`
 ```bash
 # Trust a script (computes SHA-256, adds to store)
-claude-trust /path/to/script.sh --note "Morning schedule"
+phlegyas-trust /path/to/script.sh --note "Morning schedule"
 
 # List all trusted scripts
-claude-trust --list
+phlegyas-trust --list
 
 # Revoke trust
-claude-trust --revoke /path/to/script.sh
+phlegyas-trust --revoke /path/to/script.sh
 
 # Verify all hashes still match
-claude-trust --verify
+phlegyas-trust --verify
 ```
 
 ### How It Works
@@ -285,7 +285,7 @@ claude-trust --verify
 - Changes logged to `~/.claude/trusted-scripts.log` + best-effort Pieces OS checkpoint
 
 ### Adding Trusted Scripts
-Edit `~/.claude/trusted-scripts.json` directly or use `claude-trust` CLI. The store is a simple JSON allowlist with 0600 file permissions.
+Edit `~/.claude/trusted-scripts.json` directly or use `phlegyas-trust` CLI. The store is a simple JSON allowlist with 0600 file permissions.
 
 ## Testing Strategy
 
@@ -316,19 +316,19 @@ Edit `~/.claude/trusted-scripts.json` directly or use `claude-trust` CLI. The st
 ## Adding New Patterns
 
 ### Adding Dangerous Patterns
-Edit `src/tier1_dangerous.py`:
+Edit `phlegyas/tier1_dangerous.py`:
 1. Add regex pattern to appropriate constant (e.g., `DESTRUCTIVE_PATTERNS`)
 2. Add test case to `tests/test_tier1_dangerous.py`
 
 ### Adding Safe Patterns
-Edit `src/tier2_safe.py`:
+Edit `phlegyas/tier2_safe.py`:
 1. Add regex pattern to appropriate constant (e.g., `SAFE_GIT_PATTERNS`)
 2. Add test case to `tests/test_tier2_safe.py`
 
 ### Modifying AI Evaluation
-Edit `src/tier3_ai.py`:
-1. Update `_build_evaluation_prompt()` for prompt changes (src/tier3_ai.py:103)
-2. Update `_apply_thresholds()` for threshold logic changes (src/tier3_ai.py:199)
+Edit `phlegyas/tier3_ai.py`:
+1. Update `_build_evaluation_prompt()` for prompt changes (phlegyas/tier3_ai.py:103)
+2. Update `_apply_thresholds()` for threshold logic changes (phlegyas/tier3_ai.py:199)
 
 ## Common Development Tasks
 
@@ -336,7 +336,7 @@ Edit `src/tier3_ai.py`:
 ```bash
 # Enable debug logging
 export LOG_LEVEL=DEBUG
-python src/approver_mcp.py
+python phlegyas/approver_mcp.py
 
 # Review audit log
 cat audit.jsonl | jq '.'
@@ -349,7 +349,7 @@ cat audit.jsonl | jq 'select(.tier == "tier3_ai_approve")'
 
 ### Testing AI Evaluation Locally
 ```python
-from src.tier3_ai import AIEvaluator
+from phlegyas.tier3_ai import AIEvaluator
 
 evaluator = AIEvaluator(
     model="claude-haiku-4-5-20251001",
@@ -376,7 +376,7 @@ claude -p "Your task here"
 **With CLI Flag (Manual Override):**
 ```bash
 # Use permission approver for all permission prompts
-claude --permission-prompt-tool mcp__claude-permission-approver__permissions__approve \
+claude --permission-prompt-tool mcp__phlegyas__permissions__approve \
   -p "Your task here"
 ```
 
@@ -418,7 +418,7 @@ claude --permission-prompt-tool mcp__claude-permission-approver__permissions__ap
 
 ```bash
 # ✅ Works - print mode
-claude -p "List files" --permission-prompt-tool mcp__claude-permission-approver__permissions__approve
+claude -p "List files" --permission-prompt-tool mcp__phlegyas__permissions__approve
 
 # ❌ Doesn't work - interactive mode (use static rules instead)
 claude
@@ -427,7 +427,7 @@ claude
 **Verify it's working in print mode:**
 ```bash
 # Check audit log after running a print mode command
-tail /Volumes/Repos/claude-permission-approver/audit.jsonl
+tail /Volumes/Repos/phlegyas/audit.jsonl
 
 # Should see entries like:
 # {"decision": "allow", "tier": "tier2_safe", "tool_name": "Bash", ...}
@@ -453,14 +453,14 @@ tail /Volumes/Repos/claude-permission-approver/audit.jsonl
 ## File Structure
 
 ```
-src/
+phlegyas/
   approver_mcp.py          # Main MCP server (official SDK) with permissions__approve() tool
   approver.py              # Legacy FastMCP server
   tier1_dangerous.py       # Tier 1: Dangerous pattern detection (regex-based)
   tier2_safe.py            # Tier 2: Safe operation detection (regex-based)
   tier2_5_trust.py         # Tier 2.5: Script trust store (TOFU + content hashing)
   tier3_ai.py              # Tier 3: AI evaluation with Claude (Haiku/Sonnet)
-  trust_cli.py             # CLI for managing trusted scripts (claude-trust)
+  trust_cli.py             # CLI for managing trusted scripts (phlegyas-trust)
 
 tests/
   conftest.py                # Shared fixtures and test data
