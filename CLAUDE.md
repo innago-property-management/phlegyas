@@ -142,7 +142,7 @@ black phlegyas/ tests/
 ruff check phlegyas/ tests/
 
 # Auto-fix issues
-ruff check --fix src/ tests/
+ruff check --fix phlegyas/ tests/
 ```
 
 ## Architecture Details
