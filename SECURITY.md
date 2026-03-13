@@ -4,7 +4,7 @@
 
 **Please do not open a public GitHub issue for security vulnerabilities.**
 
-Instead, report vulnerabilities via [GitHub's private security advisory feature](https://github.com/innago-property-management/claude-permission-approver/security/advisories/new).
+Instead, report vulnerabilities via [GitHub's private security advisory feature](https://github.com/innago-property-management/phlegyas/security/advisories/new).
 
 Include:
 - Description of the vulnerability

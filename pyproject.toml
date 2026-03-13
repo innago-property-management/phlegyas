@@ -1,7 +1,7 @@
 [project]
-name = "claude-permission-approver"
+name = "phlegyas"
 version = "0.1.0"
-description = "AI-powered permission approval system for Claude Code using three-tier evaluation"
+description = "Three-tier intelligent permission gate for AI agents — the ferryman at the gate"
 authors = [
     {name = "Christopher J. Anderson"}
 ]
@@ -29,9 +29,9 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/innago-property-management/claude-permission-approver"
-Repository = "https://github.com/innago-property-management/claude-permission-approver"
-Issues = "https://github.com/innago-property-management/claude-permission-approver/issues"
+Homepage = "https://github.com/innago-property-management/phlegyas"
+Repository = "https://github.com/innago-property-management/phlegyas"
+Issues = "https://github.com/innago-property-management/phlegyas/issues"
 
 [project.optional-dependencies]
 slack = [
@@ -44,15 +44,15 @@ dev = [
 ]
 
 [project.scripts]
-claude-permission-approver = "src.approver_mcp:run"
-claude-trust = "src.trust_cli:main"
+phlegyas = "phlegyas.approver_mcp:run"
+phlegyas-trust = "phlegyas.trust_cli:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src"]
+packages = ["phlegyas"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

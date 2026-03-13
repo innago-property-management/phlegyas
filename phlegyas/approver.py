@@ -1,7 +1,7 @@
 """
-Claude Permission Approver - Main FastMCP Server
+Phlegyas - Legacy FastMCP Server
 
-Three-tier intelligent permission approval system:
+Three-tier intelligent permission gate:
 - Tier 1: Block dangerous operations (instant)
 - Tier 2: Auto-approve safe operations (instant)
 - Tier 3: AI evaluation for ambiguous cases (sub-second)
@@ -16,9 +16,9 @@ from typing import Any
 from dotenv import load_dotenv
 from fastmcp import FastMCP
 
-from src.tier1_dangerous import DangerousPatternDetector
-from src.tier2_safe import SafeOperationDetector
-from src.tier3_ai import AIEvaluator
+from phlegyas.tier1_dangerous import DangerousPatternDetector
+from phlegyas.tier2_safe import SafeOperationDetector
+from phlegyas.tier3_ai import AIEvaluator
 
 # Load environment variables
 load_dotenv()
@@ -32,7 +32,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Initialize FastMCP server
-mcp = FastMCP("Claude Permission Approver")
+mcp = FastMCP("Phlegyas")
 
 # Initialize detectors
 dangerous_detector = DangerousPatternDetector()
@@ -239,7 +239,7 @@ async def get_approval_stats() -> dict[str, Any]:
 
 
 if __name__ == "__main__":
-    logger.info("Starting Claude Permission Approver MCP server...")
+    logger.info("Starting Phlegyas MCP server...")
     logger.info(f"Audit logging: {'enabled' if enable_audit_log else 'disabled'}")
     if ai_evaluator:
         logger.info(f"AI evaluation: enabled (model: {ai_evaluator.model})")

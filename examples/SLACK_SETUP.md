@@ -148,9 +148,9 @@ async def permissions__approve(toolName: str, input: dict[str, Any]) -> dict[str
 
 1. Run the approver with Slack integration:
 ```bash
-cd /path/to/claude-permission-approver
+cd /path/to/phlegyas
 source .venv/bin/activate
-python src/approver_mcp.py
+python phlegyas/approver_mcp.py
 ```
 
 2. Trigger a high-risk operation via Claude Code:
@@ -238,5 +238,5 @@ Input:
 ## Support
 
 For issues or questions:
-- GitHub: https://github.com/innago-property-management/claude-permission-approver/issues
+- GitHub: https://github.com/innago-property-management/phlegyas/issues
 - Documentation: See `examples/slack_integration.py` for implementation details

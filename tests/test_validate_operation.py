@@ -10,8 +10,8 @@ from unittest.mock import patch
 
 import pytest
 
-from src.approver_mcp import handle_validate_operation
-from src.tier3_ai import EvaluationResult
+from phlegyas.approver_mcp import handle_validate_operation
+from phlegyas.tier3_ai import EvaluationResult
 
 
 class TestValidateOperationTier1:
@@ -127,7 +127,7 @@ class TestValidateOperationTier3:
     """Tests for Tier 3 AI evaluation in validate_operation."""
 
     @pytest.mark.asyncio
-    @patch("src.tier3_ai.AIEvaluator.__init__", return_value=None)
+    @patch("phlegyas.tier3_ai.AIEvaluator.__init__", return_value=None)
     async def test_should_handle_ai_unavailable(self, mock_ai_init):
         """Validate_operation should return needs_human when AI is unavailable."""
         # Mock AIEvaluator to simulate unavailability
@@ -194,7 +194,7 @@ class TestValidateOperationTier3:
                 assert 0.0 <= response["confidence"] <= 1.0
 
     @pytest.mark.asyncio
-    @patch("src.tier3_ai.AIEvaluator.evaluate")
+    @patch("phlegyas.tier3_ai.AIEvaluator.evaluate")
     async def test_should_generate_unique_request_ids(self, mock_evaluate):
         """Validate_operation should generate unique request IDs for each needs_human response."""
         # Mock AI to always return ask_user
@@ -344,10 +344,10 @@ class TestValidateOperationAuditLogging:
             # Need to reload module to pick up new env vars
             import importlib
 
-            import src.approver_mcp
+            import phlegyas.approver_mcp
 
-            importlib.reload(src.approver_mcp)
-            from src.approver_mcp import handle_validate_operation as validate
+            importlib.reload(phlegyas.approver_mcp)
+            from phlegyas.approver_mcp import handle_validate_operation as validate
 
             # Make a validation request
             await validate({"tool_name": "Bash", "input": {"command": "git status"}})

@@ -1,6 +1,6 @@
-# Claude Permission Approver
+# Phlegyas
 
-AI-powered permission approval system for Claude Code using three-tier intelligent evaluation.
+*The ferryman at the gate — three-tier intelligent permission gate for AI agents.*
 
 ## Overview
 
@@ -36,8 +36,8 @@ This permission-prompt-tool MCP server acts as a centralized approval system tha
 
 ```bash
 # Clone the repository
-git clone https://github.com/innago-property-management/claude-permission-approver.git
-cd claude-permission-approver
+git clone https://github.com/innago-property-management/phlegyas.git
+cd phlegyas
 
 # Create virtual environment
 python3 -m venv .venv
@@ -79,7 +79,7 @@ Add to your `~/.claude/mcp-servers.json`:
   "mcpServers": {
     "permission-approver": {
       "command": "python",
-      "args": ["/path/to/claude-permission-approver/src/approver_mcp.py"],
+      "args": ["/path/to/phlegyas/phlegyas/approver_mcp.py"],
       "env": {
         "ANTHROPIC_API_KEY": "sk-ant-your-key-here",
         "PROJECT_NAME": "Your Project Name",
@@ -140,7 +140,7 @@ Instant approval for known-safe operations:
 
 Auto-approval for human-trusted scripts via content hashing:
 
-- Human trusts a script once with `claude-trust /path/to/script.sh`
+- Human trusts a script once with `phlegyas-trust /path/to/script.sh`
 - SHA-256 hash of file contents stored in `~/.claude/trusted-scripts.json`
 - On execution: hash verified → match = auto-approve, mismatch = Tier 3
 - Tier 1 dangerous patterns still checked first (trust cannot bypass)
@@ -148,12 +148,12 @@ Auto-approval for human-trusted scripts via content hashing:
 
 ```bash
 # Trust a script
-claude-trust /path/to/script.sh --note "Morning schedule"
+phlegyas-trust /path/to/script.sh --note "Morning schedule"
 
 # List, revoke, or verify
-claude-trust --list
-claude-trust --revoke /path/to/script.sh
-claude-trust --verify
+phlegyas-trust --list
+phlegyas-trust --revoke /path/to/script.sh
+phlegyas-trust --verify
 ```
 
 **Response time:** <1ms (file hash comparison)
@@ -330,7 +330,7 @@ pytest tests/test_tier2_safe.py -v
 pytest tests/test_tier3_ai.py -v
 
 # Run with coverage
-pytest tests/ --cov=src --cov-report=html
+pytest tests/ --cov=phlegyas --cov-report=html
 ```
 
 **Test suite: 233 tests (100% passing)**
@@ -421,7 +421,7 @@ export ANTHROPIC_API_KEY=sk-ant-your-key-here
 ### Tier 2 not approving expected operations
 
 **Problem:** Pattern not in safe category list
-**Solution:** Review `src/tier2_safe.py` and add pattern, or file GitHub issue
+**Solution:** Review `phlegyas/tier2_safe.py` and add pattern, or file GitHub issue
 
 ## Security Best Practices
 

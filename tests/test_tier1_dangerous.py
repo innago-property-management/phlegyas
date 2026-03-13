@@ -6,7 +6,7 @@ Tests that dangerous operations are correctly identified and blocked.
 
 import pytest
 
-from src.tier1_dangerous import DangerousPatternDetector
+from phlegyas.tier1_dangerous import DangerousPatternDetector
 
 
 class TestDangerousPatternDetector:

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from src.tier2_5_trust import ScriptTrustStore
+from phlegyas.tier2_5_trust import ScriptTrustStore
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -315,8 +315,8 @@ def test_is_trusted_with_sh_prefix(store: ScriptTrustStore, sample_script: Path)
 @pytest.mark.integration
 def test_trusted_script_bypasses_tier3(trust_store_path: Path, sample_script: Path):
     """A trusted script should be approved at Tier 2.5, not reaching Tier 3."""
-    from src.tier1_dangerous import DangerousPatternDetector
-    from src.tier2_safe import SafeOperationDetector
+    from phlegyas.tier1_dangerous import DangerousPatternDetector
+    from phlegyas.tier2_safe import SafeOperationDetector
 
     store = ScriptTrustStore(store_path=trust_store_path)
     store.trust(str(sample_script))
@@ -363,7 +363,7 @@ def test_tier1_dangerous_still_blocks_trusted_scripts(trust_store_path: Path, tm
     If someone constructs a command like 'bash /trusted/script.sh && rm -rf /',
     Tier 1 catches it first.
     """
-    from src.tier1_dangerous import DangerousPatternDetector
+    from phlegyas.tier1_dangerous import DangerousPatternDetector
 
     dangerous_script = tmp_path / "sneaky.sh"
     dangerous_script.write_text("#!/bin/bash\nrm -rf /\n")

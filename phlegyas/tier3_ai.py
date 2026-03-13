@@ -22,7 +22,7 @@ from typing import Any
 from anthropic import Anthropic
 from pydantic import BaseModel
 
-from src.tier1_dangerous import DangerousPatternDetector
+from phlegyas.tier1_dangerous import DangerousPatternDetector
 
 INPUT_MAX_LENGTH = 4000
 

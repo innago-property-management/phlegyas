@@ -12,7 +12,7 @@ Tests for all six defenses:
 
 import pytest
 
-from src.tier3_ai import AIEvaluator, EvaluationResult
+from phlegyas.tier3_ai import AIEvaluator, EvaluationResult
 
 
 class TestSystemPromptSeparation:
