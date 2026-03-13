@@ -5,12 +5,109 @@ Automatically approves operations in known-safe categories.
 No AI evaluation needed - these are always approved.
 """
 
+import json
+import logging
 import re
+from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
+
+# Default store location - matches the ~/.claude/ convention
+DEFAULT_SAFE_PATTERNS_PATH = Path.home() / ".claude" / "safe-patterns.json"
+
+
+class SafePatternStore:
+    """
+    Loads user-configurable safe patterns from ~/.claude/safe-patterns.json.
+
+    JSON schema (version 1):
+    {
+        "version": 1,
+        "patterns": {
+            "safe_bash": [{"regex": "...", "category": "...", "description": "...", "flags": ["IGNORECASE"]}],
+            "safe_tools": ["ToolName"],
+            "safe_write_dirs": ["/path/"],
+            "sensitive_files": ["pattern"]
+        }
+    }
+    """
+
+    def __init__(self, store_path: Path | None = None) -> None:
+        self._path = Path(store_path) if store_path is not None else DEFAULT_SAFE_PATTERNS_PATH
+        self.bash_patterns: list[tuple[re.Pattern, str]] = []
+        self.tool_names: set[str] = set()
+        self.write_dirs: list[str] = []
+        self.sensitive_files: list[str] = []
+        self._load()
+
+    def _load(self) -> None:
+        """Load and validate the safe-patterns.json file."""
+        if not self._path.exists():
+            return
+
+        try:
+            data = json.loads(self._path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning(f"Could not read safe-patterns store at {self._path}: {exc}")
+            return
+
+        if not isinstance(data, dict) or data.get("version") != 1:
+            logger.warning(f"Invalid safe-patterns schema at {self._path}: expected version 1")
+            return
+
+        patterns = data.get("patterns", {})
+        if not isinstance(patterns, dict):
+            return
+
+        # Load bash patterns
+        for entry in patterns.get("safe_bash", []):
+            if not isinstance(entry, dict) or "regex" not in entry:
+                continue
+            try:
+                flags = 0
+                for flag_name in entry.get("flags", []):
+                    flags |= getattr(re, flag_name, 0)
+                compiled = re.compile(entry["regex"], flags)
+                category = entry.get("category", "user-defined")
+                self.bash_patterns.append((compiled, category))
+            except re.error as exc:
+                logger.warning(
+                    f"Skipping invalid regex in safe-patterns: {entry['regex']!r}: {exc}"
+                )
+
+        # Load tool names
+        for tool in patterns.get("safe_tools", []):
+            if isinstance(tool, str):
+                self.tool_names.add(tool)
+
+        # Load write dirs
+        for d in patterns.get("safe_write_dirs", []):
+            if isinstance(d, str):
+                self.write_dirs.append(d)
+
+        # Load sensitive files
+        for f in patterns.get("sensitive_files", []):
+            if isinstance(f, str):
+                self.sensitive_files.append(f)
 
 
 class SafeOperationDetector:
     """Detects safe operations that can be auto-approved."""
+
+    def __init__(self, user_store: SafePatternStore | None = None) -> None:
+        self._user_store = user_store
+        # Merge user patterns on top of builtins (augment, never replace)
+        self._merged_read_only_tools = set(self.READ_ONLY_TOOLS)
+        self._merged_safe_write_dirs = list(self._BUILTIN_SAFE_WRITE_DIRS)
+        self._merged_sensitive_files = list(self._BUILTIN_SENSITIVE_FILES)
+        self._user_bash_patterns: list[tuple[re.Pattern, str]] = []
+
+        if user_store:
+            self._merged_read_only_tools |= user_store.tool_names
+            self._merged_safe_write_dirs.extend(user_store.write_dirs)
+            self._merged_sensitive_files.extend(user_store.sensitive_files)
+            self._user_bash_patterns = list(user_store.bash_patterns)
 
     # Git operations that are read-only or safe
     SAFE_GIT_PATTERNS = [
@@ -151,6 +248,17 @@ class SafeOperationDetector:
         re.compile(r"^wget\s+", re.IGNORECASE),
     ]
 
+    # Built-in safe write directories
+    _BUILTIN_SAFE_WRITE_DIRS = [
+        "/tmp/",
+        "docs/research/",
+        "tests/",
+        "scripts/",
+    ]
+
+    # Built-in sensitive file patterns
+    _BUILTIN_SENSITIVE_FILES = [".env", "secrets", "credentials", "package-lock.json", "yarn.lock"]
+
     # Read-only tool names (always safe)
     READ_ONLY_TOOLS = {
         "Read",
@@ -182,8 +290,8 @@ class SafeOperationDetector:
             - category: Description of safe category (or None if not safe)
         """
 
-        # Check read-only tools
-        if tool_name in self.READ_ONLY_TOOLS:
+        # Check read-only tools (builtin + user-defined)
+        if tool_name in self._merged_read_only_tools:
             return True, f"read-only tool: {tool_name}"
 
         # Check Firecrawl scraping (safe for research)
@@ -259,28 +367,30 @@ class SafeOperationDetector:
                 if "-X DELETE" not in command and "--delete" not in command:
                     return True, "web research"
 
+        # Check user-defined bash patterns
+        for compiled, category in self._user_bash_patterns:
+            if compiled.search(command):
+                return True, category
+
         return False, None
 
     def _check_write_operation(self, file_path: str) -> tuple[bool, str | None]:
         """Check if write operation is to a safe directory."""
 
-        # Safe directories for Task agents
-        safe_dirs = [
-            "/tmp/",
-            "docs/research/",
-            "tests/",
-            "scripts/",
-        ]
-
         # Relative paths are generally safe in project context
         if not file_path.startswith("/"):
-            # But still check for sensitive files
-            if any(pattern in file_path.lower() for pattern in [".env", "secrets", "credentials"]):
+            # But still check for sensitive files (builtin + user-defined)
+            sensitive_write = [".env", "secrets", "credentials"] + [
+                f
+                for f in self._merged_sensitive_files
+                if f not in [".env", "secrets", "credentials"]
+            ]
+            if any(pattern in file_path.lower() for pattern in sensitive_write):
                 return False, None
             return True, "project-relative write"
 
-        # Check absolute paths against safe directories
-        for safe_dir in safe_dirs:
+        # Check absolute paths against safe directories (builtin + user-defined)
+        for safe_dir in self._merged_safe_write_dirs:
             if file_path.startswith(safe_dir):
                 return True, f"write to safe directory: {safe_dir}"
 
@@ -289,13 +399,8 @@ class SafeOperationDetector:
     def _check_edit_operation(self, file_path: str) -> tuple[bool, str | None]:
         """Check if edit operation is to a safe file."""
 
-        # Similar logic to write operations
-        # Generally safer since it's modifying existing files, not creating new ones
-
-        # Sensitive files that shouldn't be auto-edited
-        sensitive = [".env", "secrets", "credentials", "package-lock.json", "yarn.lock"]
-
-        if any(pattern in file_path.lower() for pattern in sensitive):
+        # Sensitive files that shouldn't be auto-edited (builtin + user-defined)
+        if any(pattern in file_path.lower() for pattern in self._merged_sensitive_files):
             return False, None
 
         # Project files are generally safe to edit

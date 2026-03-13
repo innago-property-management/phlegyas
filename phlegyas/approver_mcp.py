@@ -20,7 +20,7 @@ from mcp.types import TextContent, Tool
 
 from phlegyas.tier1_dangerous import DangerousPatternDetector
 from phlegyas.tier2_5_trust import ScriptTrustStore
-from phlegyas.tier2_safe import SafeOperationDetector
+from phlegyas.tier2_safe import SafeOperationDetector, SafePatternStore
 from phlegyas.tier3_ai import AIEvaluator
 
 # Load environment variables
@@ -36,7 +36,8 @@ logger = logging.getLogger(__name__)
 
 # Initialize detectors
 dangerous_detector = DangerousPatternDetector()
-safe_detector = SafeOperationDetector()
+safe_pattern_store = SafePatternStore()
+safe_detector = SafeOperationDetector(user_store=safe_pattern_store)
 trust_store = ScriptTrustStore()
 
 # Approval cache for Tier 3 decisions (improves performance for repeated operations)

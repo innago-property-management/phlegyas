@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "patterns": {
+    "safe_bash": [
+      {
+        "regex": "^make\\s+",
+        "category": "build command",
+        "description": "GNU make targets",
+        "flags": ["IGNORECASE"]
+      },
+      {
+        "regex": "^terraform\\s+plan",
+        "category": "infra preview",
+        "description": "Terraform plan (read-only preview)"
+      },
+      {
+        "regex": "^kubectl\\s+get\\s+",
+        "category": "read-only info command",
+        "description": "kubectl get resources"
+      }
+    ],
+    "safe_tools": [
+      "mcp__custom__read_data"
+    ],
+    "safe_write_dirs": [
+      "/opt/outputs/",
+      "reports/"
+    ],
+    "sensitive_files": [
+      "config/prod.yaml",
+      "terraform.tfstate"
+    ]
+  }
+}
