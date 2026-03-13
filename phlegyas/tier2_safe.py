@@ -61,17 +61,31 @@ class SafePatternStore:
             return
 
         # Load bash patterns
+        _VALID_RE_FLAGS = {
+            "IGNORECASE",
+            "MULTILINE",
+            "DOTALL",
+            "VERBOSE",
+            "ASCII",
+            "LOCALE",
+            "UNICODE",
+        }
         for entry in patterns.get("safe_bash", []):
             if not isinstance(entry, dict) or "regex" not in entry:
                 continue
             try:
                 flags = 0
                 for flag_name in entry.get("flags", []):
-                    flags |= getattr(re, flag_name, 0)
+                    if flag_name not in _VALID_RE_FLAGS:
+                        logger.warning(
+                            f"Skipping unrecognized regex flag in safe-patterns: {flag_name!r}"
+                        )
+                        continue
+                    flags |= getattr(re, flag_name)
                 compiled = re.compile(entry["regex"], flags)
                 category = entry.get("category", "user-defined")
                 self.bash_patterns.append((compiled, category))
-            except re.error as exc:
+            except (re.error, TypeError) as exc:
                 logger.warning(
                     f"Skipping invalid regex in safe-patterns: {entry['regex']!r}: {exc}"
                 )
@@ -379,13 +393,8 @@ class SafeOperationDetector:
 
         # Relative paths are generally safe in project context
         if not file_path.startswith("/"):
-            # But still check for sensitive files (builtin + user-defined)
-            sensitive_write = [".env", "secrets", "credentials"] + [
-                f
-                for f in self._merged_sensitive_files
-                if f not in [".env", "secrets", "credentials"]
-            ]
-            if any(pattern in file_path.lower() for pattern in sensitive_write):
+            # Check against full merged sensitive list (builtins + user-defined)
+            if any(pattern in file_path.lower() for pattern in self._merged_sensitive_files):
                 return False, None
             return True, "project-relative write"
 

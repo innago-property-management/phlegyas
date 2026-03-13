@@ -182,6 +182,58 @@ class TestSafePatternStore:
         assert store.bash_patterns == []
         assert store.tool_names == set()
 
+    def test_unrecognized_flag_name_warns_and_continues(self, tmp_path):
+        """Should warn on unrecognized flag names and still load the pattern."""
+        store_file = tmp_path / "safe-patterns.json"
+        store_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "patterns": {
+                        "safe_bash": [
+                            {
+                                "regex": r"^make\s+",
+                                "category": "build",
+                                "description": "make",
+                                "flags": ["BOGUS_FLAG", "IGNORECASE"],
+                            }
+                        ]
+                    },
+                }
+            )
+        )
+        store = SafePatternStore(store_path=store_file)
+
+        # Pattern should still be loaded (BOGUS_FLAG skipped, IGNORECASE applied)
+        assert len(store.bash_patterns) == 1
+        compiled, _ = store.bash_patterns[0]
+        assert compiled.search("MAKE all")  # IGNORECASE should be active
+
+    def test_non_integer_re_attribute_as_flag_no_crash(self, tmp_path):
+        """Should not crash when flag name maps to a non-integer re attribute (e.g. 'error')."""
+        store_file = tmp_path / "safe-patterns.json"
+        store_file.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "patterns": {
+                        "safe_bash": [
+                            {
+                                "regex": r"^make\s+",
+                                "category": "build",
+                                "description": "make",
+                                "flags": ["error"],
+                            }
+                        ]
+                    },
+                }
+            )
+        )
+        store = SafePatternStore(store_path=store_file)
+
+        # "error" is not in the allowlist, so it's skipped; pattern still loads
+        assert len(store.bash_patterns) == 1
+
 
 # ---------------------------------------------------------------------------
 # SafeOperationDetector with user patterns tests
@@ -327,4 +379,11 @@ class TestSafeOperationDetectorWithUserPatterns:
 
         # Command NOT in any pattern
         is_safe, _ = detector.is_safe("Bash", {"command": "terraform apply"})
+        assert is_safe is False
+
+    def test_write_to_package_lock_is_denied(self):
+        """Write to package-lock.json (relative path) should be denied as sensitive."""
+        detector = SafeOperationDetector()
+
+        is_safe, _ = detector.is_safe("Write", {"file_path": "package-lock.json"})
         assert is_safe is False
