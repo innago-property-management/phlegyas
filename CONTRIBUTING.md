@@ -20,7 +20,7 @@ pytest -v                 # Verbose
 pytest tests/test_tier2_safe.py -v  # Specific file
 ```
 
-All 233 tests must pass before submitting a PR.
+All 276 tests must pass before submitting a PR.
 
 ## Code Style
 
@@ -28,7 +28,7 @@ We use [ruff](https://docs.astral.sh/ruff/) for linting and formatting:
 
 ```bash
 ruff check phlegyas/ tests/          # Lint
-ruff check --fix src/ tests/    # Auto-fix
+ruff check --fix phlegyas/ tests/    # Auto-fix
 ruff format phlegyas/ tests/         # Format
 ```
 

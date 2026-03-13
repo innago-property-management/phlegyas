@@ -250,8 +250,8 @@ def test_production_patterns(self):
 
 ## Current Test Status
 
-**Total Tests:** 233 (includes parametrized variants)
-**Passing:** 233 (100%)
+**Total Tests:** 276 (includes parametrized variants)
+**Passing:** 276 (100%)
 
 ## Continuous Integration
 
