@@ -289,11 +289,12 @@ Edit `~/.claude/trusted-scripts.json` directly or use `phlegyas-trust` CLI. The 
 
 ## Testing Strategy
 
-**276 tests, 100% passing.**
+**299 tests, 100% passing.**
 
 **Test Files:**
 - `tests/test_tier1_dangerous.py` - Dangerous pattern detection (32 tests)
 - `tests/test_tier2_safe.py` - Safe operation detection (79 tests)
+- `tests/test_tier2_safe_custom.py` - User-configurable safe patterns (23 tests)
 - `tests/test_tier2_5_trust.py` - Script trust store (27 tests)
 - `tests/test_tier3_ai.py` - AI evaluation logic (32 tests)
 - `tests/test_c3_prompt_injection.py` - Prompt injection hardening (34 tests)
