@@ -16,6 +16,18 @@ logger = logging.getLogger(__name__)
 # Default store location - matches the ~/.claude/ convention
 DEFAULT_SAFE_PATTERNS_PATH = Path.home() / ".claude" / "safe-patterns.json"
 
+# Valid regex flag names accepted in safe-patterns.json "flags" arrays
+_VALID_RE_FLAGS = frozenset(
+    {
+        "IGNORECASE",
+        "MULTILINE",
+        "DOTALL",
+        "VERBOSE",
+        "ASCII",
+        "UNICODE",
+    }
+)
+
 
 class SafePatternStore:
     """
@@ -61,15 +73,6 @@ class SafePatternStore:
             return
 
         # Load bash patterns
-        _VALID_RE_FLAGS = {
-            "IGNORECASE",
-            "MULTILINE",
-            "DOTALL",
-            "VERBOSE",
-            "ASCII",
-            "LOCALE",
-            "UNICODE",
-        }
         for entry in patterns.get("safe_bash", []):
             if not isinstance(entry, dict) or "regex" not in entry:
                 continue
