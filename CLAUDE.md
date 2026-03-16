@@ -287,19 +287,54 @@ phlegyas-trust --verify
 ### Adding Trusted Scripts
 Edit `~/.claude/trusted-scripts.json` directly or use `phlegyas-trust` CLI. The store is a simple JSON allowlist with 0600 file permissions.
 
+## User-Configurable Safe Patterns (H2)
+
+`SafePatternStore` (`phlegyas/tier2_safe.py`) loads project- or user-specific safe patterns from `~/.claude/safe-patterns.json` and merges them into Tier 2's built-in defaults. User patterns augment — they never replace — the built-in pattern sets.
+
+### Schema (version 1)
+
+```json
+{
+  "version": 1,
+  "patterns": {
+    "safe_bash": [
+      {
+        "regex": "^make\\s+",
+        "category": "build command",
+        "description": "GNU make targets",
+        "flags": ["IGNORECASE"]
+      }
+    ],
+    "safe_tools": ["mcp__custom__read_data"],
+    "safe_write_dirs": ["/opt/outputs/", "reports/"],
+    "sensitive_files": ["config/prod.yaml", "terraform.tfstate"]
+  }
+}
+```
+
+**Pattern types:**
+- `safe_bash` — Extra bash command patterns to auto-approve; each entry needs `regex`, optional `category`, `description`, and `flags` (valid values: `IGNORECASE`, `MULTILINE`, `DOTALL`, `VERBOSE`, `ASCII`, `UNICODE`)
+- `safe_tools` — Additional MCP tool names to treat as read-only (always approved)
+- `safe_write_dirs` — Absolute or relative directory prefixes where Write operations are safe
+- `sensitive_files` — Filename patterns that block auto-approval for Write/Edit operations
+
+**Note:** Invalid regex patterns are skipped with a warning; unrecognised flag names are also skipped. A missing or malformed file is silently ignored (falls through to Tier 3).
+
+See `safe-patterns.example.json` in the repo root for a complete example with Terraform, kubectl, and custom MCP tool patterns.
+
 ## Testing Strategy
 
 **299 tests, 100% passing.**
 
 **Test Files:**
 - `tests/test_tier1_dangerous.py` - Dangerous pattern detection (32 tests)
-- `tests/test_tier2_safe.py` - Safe operation detection (79 tests)
+- `tests/test_tier2_safe.py` - Safe operation detection (89 tests)
 - `tests/test_tier2_safe_custom.py` - User-configurable safe patterns (23 tests)
-- `tests/test_tier2_5_trust.py` - Script trust store (27 tests)
-- `tests/test_tier3_ai.py` - AI evaluation logic (32 tests)
+- `tests/test_tier2_5_trust.py` - Script trust store (38 tests)
+- `tests/test_tier3_ai.py` - AI evaluation logic (34 tests)
 - `tests/test_c3_prompt_injection.py` - Prompt injection hardening (34 tests)
 - `tests/test_validate_operation.py` - Task agent validation workflow (23 tests)
-- `tests/test_approver.py` - Integration tests (18 tests)
+- `tests/test_approver.py` - Integration tests (26 tests)
 - `tests/conftest.py` - Shared fixtures and test data
 
 **Key Fixtures (conftest.py):**
