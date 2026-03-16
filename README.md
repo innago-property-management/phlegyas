@@ -8,6 +8,10 @@
   <sub>19th century stained glass, Museo Poldi Pezzoli, Milan. Photo: Giovanni Dall'Orto (Attribution license)</sub>
 </div>
 
+[![CI](https://github.com/innago-property-management/phlegyas/actions/workflows/ci.yml/badge.svg)](https://github.com/innago-property-management/phlegyas/actions/workflows/ci.yml)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
+
 *The ferryman at the gate — three-tier intelligent permission gate for AI agents.*
 
 ## Overview
@@ -41,6 +45,16 @@ This permission-prompt-tool MCP server acts as a centralized approval system tha
 ## Quick Start
 
 ### 1. Installation
+
+**Option A: pip install (coming soon)**
+
+```bash
+pip install phlegyas
+```
+
+> PyPI publishing is in progress. Until the package is available, use Option B below.
+
+**Option B: Install from source**
 
 ```bash
 # Clone the repository
@@ -341,13 +355,15 @@ pytest tests/test_tier3_ai.py -v
 pytest tests/ --cov=phlegyas --cov-report=html
 ```
 
-**Test suite: 276 tests (100% passing)**
+**Test suite: 299 tests (100% passing)**
 - Tier 1: 32 tests (dangerous patterns)
-- Tier 2: 79 tests (safe operations)
-- Tier 2.5: 27 tests (script trust store)
-- Tier 3: 33 tests (AI evaluation)
+- Tier 2: 89 tests (safe operations)
+- Tier 2 custom: 23 tests (user-configurable safe patterns)
+- Tier 2.5: 38 tests (script trust store)
+- Tier 3: 34 tests (AI evaluation)
+- Prompt injection: 34 tests (injection hardening)
 - Validate Operation: 23 tests (Task agent workflow)
-- Integration: 18 tests (end-to-end)
+- Integration: 26 tests (end-to-end + approver)
 
 ## Performance & Cost
 

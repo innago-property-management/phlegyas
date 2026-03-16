@@ -88,7 +88,7 @@ pip install slack-sdk>=3.31.0
 
 ## Step 8: Integrate with Approver
 
-Update `src/approver_mcp.py` to use Slack for `ask_user` decisions:
+Update `phlegyas/approver_mcp.py` to use Slack for `ask_user` decisions:
 
 ```python
 from examples.slack_integration import SlackApprovalService

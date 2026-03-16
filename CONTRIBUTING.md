@@ -20,7 +20,7 @@ pytest -v                 # Verbose
 pytest tests/test_tier2_safe.py -v  # Specific file
 ```
 
-All 276 tests must pass before submitting a PR.
+All 299 tests must pass before submitting a PR.
 
 ## Code Style
 
