@@ -1,5 +1,13 @@
 # Phlegyas
 
+<div align="center">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/thumb/7/7e/Milano_-_Vetrata_ottocentesca_del_Museo_Poldi_Pezzoli_-_Caronte_-_Foto_Giovanni_Dall%27Orto_-_14-sept-2003.jpg/960px-Milano_-_Vetrata_ottocentesca_del_Museo_Poldi_Pezzoli_-_Caronte_-_Foto_Giovanni_Dall%27Orto_-_14-sept-2003.jpg" alt="Phlegyas ferrying Dante and Virgil across the Styx — 19th century stained glass, Museo Poldi Pezzoli, Milan" width="400">
+  <br>
+  <em>Phlegyas ferrying Dante and Virgil across the Styx</em>
+  <br>
+  <sub>19th century stained glass, Museo Poldi Pezzoli, Milan. Photo: Giovanni Dall'Orto (Attribution license)</sub>
+</div>
+
 *The ferryman at the gate — three-tier intelligent permission gate for AI agents.*
 
 ## Overview
