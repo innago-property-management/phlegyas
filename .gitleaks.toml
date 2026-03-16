@@ -1,0 +1,9 @@
+title = "Phlegyas Gitleaks Config"
+version = 3
+
+[allowlist]
+description = "Allow test fixtures with fake API keys"
+paths = [
+  '''tests/.*\.py''',
+  '''\.env\.example''',
+]
