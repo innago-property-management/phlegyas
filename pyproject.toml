@@ -1,6 +1,6 @@
 [project]
 name = "phlegyas"
-version = "0.1.0"
+version = "0.1.1"
 description = "Three-tier intelligent permission gate for AI agents — the ferryman at the gate"
 authors = [
     {name = "Christopher J. Anderson"}

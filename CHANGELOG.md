@@ -5,7 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] - 2026-03-16
+## [0.1.1] - 2026-03-16
+
+### Fixed
+
+- Fix PyPI publish workflow: use commit SHA instead of annotated tag SHA for Docker-based action
+
+## [0.1.0] - 2026-03-16 [YANKED]
 
 ### Added
 
@@ -19,4 +25,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSONL audit logging with credential masking
 - 299 tests (100% passing)
 
+[0.1.1]: https://github.com/innago-property-management/phlegyas/releases/tag/0.1.1
 [0.1.0]: https://github.com/innago-property-management/phlegyas/releases/tag/0.1.0
