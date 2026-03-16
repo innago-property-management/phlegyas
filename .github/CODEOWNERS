@@ -9,4 +9,4 @@ tests/ @innago-property-management/innago-open-source
 .github/ @innago-property-management/innago-open-source
 
 # Documentation
-*.md @innago-property-management/innago-open-source
+**/*.md @innago-property-management/innago-open-source
