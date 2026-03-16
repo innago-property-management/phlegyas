@@ -19,4 +19,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSONL audit logging with credential masking
 - 299 tests (100% passing)
 
-[0.1.0]: https://github.com/innago-property-management/phlegyas/releases/tag/v0.1.0
+[0.1.0]: https://github.com/innago-property-management/phlegyas/releases/tag/0.1.0
