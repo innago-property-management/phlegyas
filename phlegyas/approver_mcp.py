@@ -23,6 +23,14 @@ from phlegyas.tier2_5_trust import ScriptTrustStore
 from phlegyas.tier2_safe import SafeOperationDetector, SafePatternStore
 from phlegyas.tier3_ai import AIEvaluator
 
+# Conditional import — slack is an optional dependency
+try:
+    from phlegyas.slack import SlackApprovalService
+
+    _slack_available = True
+except ImportError:
+    _slack_available = False
+
 # Load environment variables
 load_dotenv()
 
@@ -151,6 +159,19 @@ try:
 except Exception as e:
     logger.warning(f"AI evaluator initialization failed: {e}")
     logger.warning("Only Tier 1 (dangerous) and Tier 2 (safe) will be available")
+
+# Initialize Slack escalation service (optional — requires [slack] extra)
+slack_service = None
+if _slack_available and SlackApprovalService.is_available():
+    try:
+        slack_service = SlackApprovalService()
+        slack_service.start_background()
+        logger.info("Slack escalation service initialized and connected")
+    except Exception as e:
+        logger.warning(f"Slack service initialization failed: {e}")
+        logger.warning("Human escalation via Slack will not be available")
+else:
+    logger.info("Slack escalation not configured (set SLACK_BOT_TOKEN + SLACK_APP_TOKEN to enable)")
 
 # Audit log configuration
 enable_audit_log = os.getenv("ENABLE_AUDIT_LOG", "true").lower() == "true"
@@ -489,6 +510,32 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
             return [TextContent(type="text", text=json.dumps(result))]
 
         else:  # ask_user
+            # Escalate to Slack if configured
+            if slack_service is not None:
+                logger.info(f"Escalating to Slack: {evaluation.reasoning}")
+                slack_decision = await slack_service.request_approval(
+                    tool_name=tool_name,
+                    input_data=input_data,
+                    reasoning=evaluation.reasoning,
+                    category=evaluation.category,
+                )
+                behavior = "allow" if slack_decision == "allow" else "deny"
+                tier_label = (
+                    "tier3_slack_approved" if slack_decision == "allow" else "tier3_slack_denied"
+                )
+                message = f"Slack human decision: {slack_decision} — {evaluation.reasoning}"
+                write_audit_log(
+                    tool_name,
+                    input_data,
+                    behavior,
+                    tier_label,
+                    message,
+                    evaluation.confidence,
+                )
+                result = {"behavior": behavior, "message": message, "updatedInput": {}}
+                return [TextContent(type="text", text=json.dumps(result))]
+
+            # No Slack configured: deny as before
             message = (
                 f"Denied: Requires human approval. "
                 f"{evaluation.reasoning} (confidence: {evaluation.confidence:.2f})"
@@ -688,6 +735,18 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
                 agent_id=agent_id,
             )
             pending_approvals[request_id] = pending
+
+            # Notify Slack if configured (fire-and-forget)
+            if slack_service is not None:
+                asyncio.create_task(
+                    slack_service.notify_pending(
+                        tool_name=tool_name,
+                        input_data=input_data,
+                        reasoning=evaluation.reasoning,
+                        category=evaluation.category,
+                        request_id=request_id,
+                    )
+                )
 
             write_audit_log(
                 tool_name,
@@ -906,9 +965,17 @@ async def main():
         logger.info(f"AI evaluation: enabled (model: {ai_evaluator.model})")
     else:
         logger.info("AI evaluation: disabled")
+    if slack_service:
+        logger.info("Slack escalation: enabled")
+    else:
+        logger.info("Slack escalation: disabled")
 
-    async with stdio_server() as (read_stream, write_stream):
-        await app.run(read_stream, write_stream, app.create_initialization_options())
+    try:
+        async with stdio_server() as (read_stream, write_stream):
+            await app.run(read_stream, write_stream, app.create_initialization_options())
+    finally:
+        if slack_service:
+            slack_service.close()
 
 
 def run():

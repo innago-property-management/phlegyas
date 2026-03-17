@@ -319,6 +319,46 @@ Edit `~/.claude/trusted-scripts.json` directly or use `phlegyas-trust` CLI. The 
 
 See `safe-patterns.example.json` in the repo root for a complete example with Terraform, kubectl, and custom MCP tool patterns.
 
+## Slack Escalation
+
+When Tier 3 returns `ask_user` and Slack is configured, phlegyas escalates the decision to a human via an interactive Slack message with Approve/Deny buttons instead of falling back to an automatic deny.
+
+### Required Environment Variables
+
+- `SLACK_BOT_TOKEN` — Bot OAuth token (`xoxb-...`)
+- `SLACK_APP_TOKEN` — App-level token for Socket Mode (`xapp-...`)
+- `SLACK_APPROVAL_CHANNEL` — Channel name (without `#`) to post approval requests
+
+### Installation
+
+```bash
+pip install phlegyas[slack]
+# or in editable mode
+pip install -e ".[slack]"
+```
+
+### Behavior by Tool
+
+| Tool | Slack behavior |
+|------|---------------|
+| `permissions__approve` | Blocks the permission prompt, waiting for a button click before returning `allow`/`deny` |
+| `validate_operation` | Fire-and-forget notification; returns `pending` immediately with a `request_id` for later retrieval |
+
+### Timeout
+
+If no human clicks Approve or Deny within the timeout window (default: 300 seconds), the request is **auto-denied**. Override with the `SLACK_APPROVAL_TIMEOUT_SECONDS` env var or the `timeout_seconds` parameter on `request_approval()`.
+
+### Audit Log Tier Labels
+
+Slack-resolved decisions appear in `audit.jsonl` with these tier values:
+
+- `tier3_slack_approved` — Human clicked Approve
+- `tier3_slack_denied` — Human clicked Deny (or request timed out)
+
+### Setup Guide
+
+See `examples/SLACK_SETUP.md` for full Slack App creation, scopes, Socket Mode configuration, and workspace installation steps.
+
 ## Testing Strategy
 
 **299 tests, 100% passing.**
