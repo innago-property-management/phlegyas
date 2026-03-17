@@ -326,9 +326,9 @@ class SlackApprovalService:
         self.socket_client.close()
 
 
-# Example usage and integration with approver.py
+# Example usage and integration with approver_mcp.py
 async def example_integration():
-    """Example showing how to integrate Slack approval into approver.py."""
+    """Example showing how to integrate Slack approval into approver_mcp.py."""
 
     from phlegyas.tier3_ai import AIEvaluator
 

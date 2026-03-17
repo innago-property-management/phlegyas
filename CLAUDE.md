@@ -128,9 +128,6 @@ pytest -m integration
 ```bash
 # Run directly with Python (official MCP SDK)
 python phlegyas/approver_mcp.py
-
-# Legacy FastMCP server (backup)
-python phlegyas/approver.py
 ```
 
 ### Code Quality
@@ -473,7 +470,6 @@ tail /Volumes/Repos/phlegyas/audit.jsonl
 
 **Core:**
 - `mcp` - Official MCP SDK (used by `approver_mcp.py`)
-- `fastmcp>=0.2.0` - FastMCP framework (used by legacy `approver.py`)
 - `anthropic>=0.39.0` - Anthropic API client for AI evaluation
 - `pydantic>=2.0.0` - Data validation and settings management
 - `python-dotenv>=1.0.0` - Environment variable management
@@ -491,7 +487,6 @@ tail /Volumes/Repos/phlegyas/audit.jsonl
 ```
 phlegyas/
   approver_mcp.py          # Main MCP server (official SDK) with permissions__approve() tool
-  approver.py              # Legacy FastMCP server
   tier1_dangerous.py       # Tier 1: Dangerous pattern detection (regex-based)
   tier2_safe.py            # Tier 2: Safe operation detection (regex-based)
   tier2_5_trust.py         # Tier 2.5: Script trust store (TOFU + content hashing)
