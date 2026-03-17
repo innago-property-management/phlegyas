@@ -110,12 +110,14 @@ class SlackApprovalService:
         self.approval_channel = approval_channel or os.getenv("SLACK_APPROVAL_CHANNEL", "approvals")
         self.timeout_seconds = timeout_seconds
 
-        assert self.bot_token, (
-            "SLACK_BOT_TOKEN is required. Check is_available() before constructing."
-        )
-        assert self.app_token, (
-            "SLACK_APP_TOKEN is required. Check is_available() before constructing."
-        )
+        if not self.bot_token:
+            raise ValueError(
+                "SLACK_BOT_TOKEN is required. Check is_available() before constructing."
+            )
+        if not self.app_token:
+            raise ValueError(
+                "SLACK_APP_TOKEN is required. Check is_available() before constructing."
+            )
 
         # Slack SDK clients
         self.web_client: WebClient = WebClient(token=self.bot_token)
@@ -123,12 +125,12 @@ class SlackApprovalService:
             app_token=self.app_token, web_client=self.web_client
         )
 
-        # {message_ts: asyncio.Future[str]} — guarded by _lock
-        self.pending_approvals: dict[str, asyncio.Future] = {}
+        # {message_ts: (asyncio.Future[str], asyncio.AbstractEventLoop)} — guarded by _lock
+        self.pending_approvals: dict[str, tuple[asyncio.Future, asyncio.AbstractEventLoop]] = {}
         self._lock = threading.Lock()
 
-        # Asyncio event loop captured in start_background()
-        self._loop: asyncio.AbstractEventLoop | None = None
+        # Blocks posted per message_ts — cached for _update_message_with_decision
+        self._posted_blocks: dict[str, list[dict[str, Any]]] = {}
 
         # Idempotency guard for start_background()
         self._started = False
@@ -146,17 +148,10 @@ class SlackApprovalService:
         Spawn a daemon thread running the Socket Mode client.
 
         Idempotent — calling more than once is safe.
-        Captures the current asyncio event loop so that ``_handle_interaction``
-        can resolve Futures from its own thread.
         """
         with self._start_lock:
             if self._started:
                 return
-
-            try:
-                self._loop = asyncio.get_event_loop()
-            except RuntimeError:
-                self._loop = asyncio.new_event_loop()
 
             thread = threading.Thread(
                 target=self._run_socket_client,
@@ -186,9 +181,9 @@ class SlackApprovalService:
         with self._lock:
             pending = dict(self.pending_approvals)
 
-        for _ts, future in pending.items():
-            if self._loop is not None and not future.done():
-                self._loop.call_soon_threadsafe(
+        for _ts, (future, loop) in pending.items():
+            if not future.done():
+                loop.call_soon_threadsafe(
                     lambda f=future: f.set_result("deny") if not f.done() else None
                 )
 
@@ -238,11 +233,14 @@ class SlackApprovalService:
             message_ts = response["ts"]
             logger.info("Sent approval request to Slack: ts=%s", message_ts)
 
-            loop = asyncio.get_event_loop()
+            # Cache the blocks for _update_message_with_decision
+            self._posted_blocks[message_ts] = blocks
+
+            loop = asyncio.get_running_loop()
             approval_future: asyncio.Future[str] = loop.create_future()
 
             with self._lock:
-                self.pending_approvals[message_ts] = approval_future
+                self.pending_approvals[message_ts] = (approval_future, loop)
 
             try:
                 decision = await asyncio.wait_for(approval_future, timeout=timeout)
@@ -258,6 +256,7 @@ class SlackApprovalService:
             finally:
                 with self._lock:
                     self.pending_approvals.pop(message_ts, None)
+                self._posted_blocks.pop(message_ts, None)
 
         except SlackApiError as exc:
             logger.error("Slack API error during request_approval: %s", exc.response.get("error"))
@@ -441,27 +440,22 @@ class SlackApprovalService:
         decision: str = action["value"]  # "allow" or "deny"
         user_id: str = payload["user"]["id"]
 
-        try:
-            user_info = self.web_client.users_info(user=user_id)
-            user_name: str = user_info["user"]["real_name"]
-        except Exception:
-            user_name = user_id
-
         logger.info(
-            "User %s (%s) decided: %s for message ts=%s",
-            user_name,
+            "User %s decided: %s for message ts=%s",
             user_id,
             decision,
             message_ts,
         )
 
         with self._lock:
-            future = self.pending_approvals.get(message_ts)
+            entry = self.pending_approvals.get(message_ts)
 
-        if future is not None and self._loop is not None and not future.done():
-            self._loop.call_soon_threadsafe(
-                lambda f=future, d=decision: f.set_result(d) if not f.done() else None
-            )
+        if entry is not None:
+            future, loop = entry
+            if not future.done():
+                loop.call_soon_threadsafe(
+                    lambda f=future, d=decision: f.set_result(d) if not f.done() else None
+                )
 
     def _update_message_with_decision(self, message_ts: str, decision: str) -> None:
         """Update the Slack message to show the final decision (approve/deny/timeout)."""
@@ -475,17 +469,9 @@ class SlackApprovalService:
         timestamp = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
 
         try:
-            history = self.web_client.conversations_history(
-                channel=self.approval_channel,
-                latest=message_ts,
-                limit=1,
-                inclusive=True,
-            )
-
-            if not history["messages"]:
+            original_blocks = self._posted_blocks.get(message_ts)
+            if not original_blocks:
                 return
-
-            original_blocks: list[dict] = history["messages"][0]["blocks"]
 
             # Strip the action buttons
             updated_blocks = [b for b in original_blocks if b.get("block_id") != "approval_actions"]

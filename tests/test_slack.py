@@ -578,7 +578,6 @@ class TestSlackStartBackground:
     def test_start_background_is_idempotent(self, service):
         """Calling start_background() twice must only spawn one thread."""
         spawned: list = []
-        fake_loop = MagicMock(spec=asyncio.AbstractEventLoop)
 
         def counting_thread(**kwargs):
             t = MagicMock()
@@ -586,10 +585,7 @@ class TestSlackStartBackground:
             spawned.append(t)
             return t
 
-        with (
-            patch("threading.Thread", side_effect=counting_thread),
-            patch("asyncio.get_event_loop", return_value=fake_loop),
-        ):
+        with patch("threading.Thread", side_effect=counting_thread):
             service.start_background()
             service.start_background()  # Second call — no-op
 
@@ -599,33 +595,28 @@ class TestSlackStartBackground:
     def test_start_background_sets_started_flag(self, service):
         """start_background() must set _started to True."""
         assert service._started is False
-        fake_loop = MagicMock(spec=asyncio.AbstractEventLoop)
 
-        with (
-            patch("threading.Thread", return_value=MagicMock()),
-            patch("asyncio.get_event_loop", return_value=fake_loop),
-        ):
+        with patch("threading.Thread", return_value=MagicMock()):
             service.start_background()
 
         assert service._started is True
 
-    def test_start_background_captures_event_loop(self, service):
-        """start_background() must assign an asyncio event loop to self._loop."""
-        assert service._loop is None
-        fake_loop = MagicMock(spec=asyncio.AbstractEventLoop)
+    def test_start_background_does_not_store_loop(self, service):
+        """start_background() should not store a loop — loops are per-request now."""
+        assert (
+            not hasattr(service, "_loop") or service._loop is None
+            if hasattr(service, "_loop")
+            else True
+        )
 
-        with (
-            patch("threading.Thread", return_value=MagicMock()),
-            patch("asyncio.get_event_loop", return_value=fake_loop),
-        ):
+        with patch("threading.Thread", return_value=MagicMock()):
             service.start_background()
 
-        assert service._loop is not None
+        assert service._started is True
 
     def test_start_background_spawns_daemon_thread(self, service):
         """The background thread must be a daemon named 'phlegyas-slack-socket'."""
         captured: dict = {}
-        fake_loop = MagicMock(spec=asyncio.AbstractEventLoop)
 
         def fake_thread(**kwargs):
             captured.update(kwargs)
@@ -633,10 +624,7 @@ class TestSlackStartBackground:
             t.start = MagicMock()
             return t
 
-        with (
-            patch("threading.Thread", side_effect=fake_thread),
-            patch("asyncio.get_event_loop", return_value=fake_loop),
-        ):
+        with patch("threading.Thread", side_effect=fake_thread):
             service.start_background()
 
         assert captured.get("daemon") is True
@@ -653,11 +641,7 @@ class TestSlackClose:
 
     def test_close_resets_started_flag(self, service):
         """close() must set _started back to False."""
-        fake_loop = MagicMock(spec=asyncio.AbstractEventLoop)
-        with (
-            patch("threading.Thread", return_value=MagicMock()),
-            patch("asyncio.get_event_loop", return_value=fake_loop),
-        ):
+        with patch("threading.Thread", return_value=MagicMock()):
             service.start_background()
 
         assert service._started is True
@@ -682,7 +666,7 @@ class TestSlackClose:
 
         future: asyncio.Future[str] = loop.create_future()
         with service._lock:
-            service.pending_approvals["ts-pending"] = future
+            service.pending_approvals["ts-pending"] = (future, loop)
 
         service.close()
 
@@ -691,18 +675,20 @@ class TestSlackClose:
 
         assert future.done()
         assert future.result() == "deny"
+
+        # Drain before close to avoid ResourceWarnings
+        loop.run_until_complete(asyncio.sleep(0))
         loop.close()
 
     def test_close_skips_already_done_futures(self, service):
         """close() must not raise when a pending future is already resolved."""
         loop = asyncio.new_event_loop()
-        service._loop = loop
 
         future: asyncio.Future[str] = loop.create_future()
         future.set_result("allow")  # Already done
 
         with service._lock:
-            service.pending_approvals["ts-done"] = future
+            service.pending_approvals["ts-done"] = (future, loop)
 
         # Should complete without InvalidStateError
         service.close()
@@ -711,3 +697,66 @@ class TestSlackClose:
         # report unclosed-socket ResourceWarnings during garbage collection.
         loop.run_until_complete(asyncio.sleep(0))
         loop.close()
+
+
+# ---------------------------------------------------------------------------
+# TestSlackConcurrentInteraction
+# ---------------------------------------------------------------------------
+
+
+class TestSlackConcurrentInteraction:
+    """Test that request_approval + _handle_interaction work together across threads."""
+
+    @pytest.mark.asyncio
+    async def test_handle_interaction_resolves_request_approval(self, service, monkeypatch):
+        """
+        Call request_approval(), invoke _handle_interaction() from another thread
+        with a mock payload, and assert the returned decision matches the button value.
+        """
+        import threading
+
+        import phlegyas.slack as slack_module
+
+        # Inject SocketModeResponse fake so _handle_interaction can call it
+        monkeypatch.setattr(
+            slack_module, "SocketModeResponse", lambda envelope_id=None: MagicMock(), raising=False
+        )
+
+        # Mock chat_postMessage to return a message_ts
+        service.web_client.chat_postMessage.return_value = {"ts": "ts-concurrent"}
+        service.web_client.chat_update.return_value = {"ok": True}
+
+        # Build a mock SocketModeRequest payload
+        mock_req = MagicMock()
+        mock_req.type = "interactive"
+        mock_req.envelope_id = "env-123"
+        mock_req.payload = {
+            "type": "block_actions",
+            "message": {"ts": "ts-concurrent"},
+            "actions": [
+                {"action_id": "approve_permission", "value": "allow"},
+            ],
+            "user": {"id": "U123"},
+        }
+
+        async def approve_from_thread():
+            """Wait briefly, then call _handle_interaction from a separate thread."""
+            await asyncio.sleep(0.1)
+            t = threading.Thread(
+                target=service._handle_interaction,
+                args=(service.socket_client, mock_req),
+            )
+            t.start()
+            t.join(timeout=2)
+
+        # Run both concurrently
+        approve_task = asyncio.create_task(approve_from_thread())
+        decision = await service.request_approval(
+            tool_name="Bash",
+            input_data={"command": "echo hello"},
+            reasoning="Test concurrent approval",
+            timeout_seconds=5,
+        )
+        await approve_task
+
+        assert decision == "allow"
