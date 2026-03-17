@@ -1,6 +1,6 @@
 [project]
 name = "phlegyas"
-version = "0.1.1"
+dynamic = ["version"]
 description = "Three-tier intelligent permission gate for AI agents — the ferryman at the gate"
 authors = [
     {name = "Christopher J. Anderson"}
@@ -22,7 +22,6 @@ classifiers = [
 ]
 dependencies = [
     "mcp>=1.0.0",
-    "fastmcp>=0.2.0",
     "anthropic>=0.39.0",
     "pydantic>=2.0.0",
     "python-dotenv>=1.0.0",
@@ -50,6 +49,9 @@ phlegyas-trust = "phlegyas.trust_cli:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+path = "phlegyas/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["phlegyas"]
