@@ -291,7 +291,7 @@ def main():
     is_dangerous, reason = dangerous_detector.is_dangerous(tool_name, input_data)
     if is_dangerous:
         json.dump({"error": f"Blocked by phlegyas: {reason}"}, sys.stdout)
-        return
+        sys.exit(1)
 
     safe_detector = SafeOperationDetector(user_store=SafePatternStore())
     is_safe, _ = safe_detector.is_safe(tool_name, input_data)
@@ -493,7 +493,7 @@ See `examples/SLACK_SETUP.md` for full Slack App creation and configuration guid
 |------|---------------|
 | MCP: `permissions__approve` | Blocks, waits for button click, returns `allow`/`deny` |
 | MCP: `validate_operation` | Fire-and-forget notification, returns `pending` with `request_id` |
-| Hook: PreToolUse | Fire-and-forget notification (does not block) |
+| Hook: PreToolUse | Not applicable (hook does not include Slack code) |
 
 ### Timeout
 
