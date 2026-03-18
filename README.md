@@ -52,7 +52,7 @@ This permission-prompt-tool MCP server acts as a centralized approval system tha
 pip install phlegyas
 ```
 
-> PyPI publishing is in progress. Until the package is available, use Option B below.
+> **Note:** Install with Slack support using `pip install phlegyas[slack]`
 
 **Option B: Install from source**
 
@@ -99,7 +99,7 @@ Add to your `~/.claude/mcp-servers.json`:
 ```json
 {
   "mcpServers": {
-    "permission-approver": {
+    "phlegyas": {
       "command": "python",
       "args": ["/path/to/phlegyas/phlegyas/approver_mcp.py"],
       "env": {
@@ -116,7 +116,7 @@ Add to your `~/.claude/mcp-servers.json`:
 ### 4. Run Claude Code with Permission Tool
 
 ```bash
-claude --permission-prompt-tool mcp__permission-approver__permissions__approve \
+claude --permission-prompt-tool mcp__phlegyas__permissions__approve \
   -p "Refactor the authentication service to use Auth0"
 ```
 
@@ -247,6 +247,92 @@ Input: {"file_path": "/etc/app/config.yaml", "content": "..."}
 # Final: DENIED (pending human approval)
 ```
 
+## Claude Code Hooks (PreToolUse Guardrail)
+
+Phlegyas can run as a Claude Code PreToolUse hook, providing a fast safety net for autonomous agents without MCP server overhead. This is ideal for supervised agent workflows (e.g., Cygnus/ACP) running with `bypassPermissions`.
+
+### How It Works
+
+The hook evaluates every tool call through Tier 1 and Tier 2:
+- **Tier 1 dangerous** → blocks the tool call (returns error)
+- **Tier 2 safe** → passes silently (tool proceeds)
+- **Ambiguous** → passes through, optionally notifies Slack
+
+### Setup
+
+1. Install phlegyas:
+```bash
+pip install phlegyas
+```
+
+2. Create the hook script at `~/.claude/hooks/phlegyas-guardrail.py`:
+```python
+#!/usr/bin/env python3
+import json, sys
+
+def main():
+    try:
+        data = json.loads(sys.stdin.read())
+    except (json.JSONDecodeError, OSError):
+        return
+
+    tool_name = data.get("tool_name", "")
+    input_data = data.get("input", {})
+    if not tool_name:
+        return
+
+    try:
+        from phlegyas.tier1_dangerous import DangerousPatternDetector
+        from phlegyas.tier2_safe import SafeOperationDetector, SafePatternStore
+    except ImportError:
+        return
+
+    dangerous_detector = DangerousPatternDetector()
+    is_dangerous, reason = dangerous_detector.is_dangerous(tool_name, input_data)
+    if is_dangerous:
+        json.dump({"error": f"Blocked by phlegyas: {reason}"}, sys.stdout)
+        return
+
+    safe_detector = SafeOperationDetector(user_store=SafePatternStore())
+    is_safe, _ = safe_detector.is_safe(tool_name, input_data)
+    if is_safe:
+        return  # Pass through
+
+    # Ambiguous: pass through (Tier 3 AI not invoked for speed)
+
+if __name__ == "__main__":
+    main()
+```
+
+3. Wire into `~/.claude/settings.json`:
+```json
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "*",
+        "hooks": [{
+          "type": "command",
+          "command": "python3 ~/.claude/hooks/phlegyas-guardrail.py",
+          "timeout": 5000
+        }]
+      }
+    ]
+  }
+}
+```
+
+### Hook vs MCP Server
+
+| Feature | Hook (PreToolUse) | MCP Server |
+|---------|-------------------|------------|
+| Tier 1 + 2 | Yes | Yes |
+| Tier 2.5 (TOFU) | No | Yes |
+| Tier 3 (AI eval) | No | Yes |
+| Slack escalation | Notify only | Block + wait |
+| Latency | <10ms | 200-500ms (Tier 3) |
+| Best for | Supervised agents | Print mode (`-p`) |
+
 ## MCP Tools
 
 The server exposes five tools:
@@ -355,7 +441,7 @@ pytest tests/test_tier3_ai.py -v
 pytest tests/ --cov=phlegyas --cov-report=html
 ```
 
-**Test suite: 299 tests (100% passing)**
+**Test suite: 334 tests (100% passing)**
 - Tier 1: 32 tests (dangerous patterns)
 - Tier 2: 89 tests (safe operations)
 - Tier 2 custom: 23 tests (user-configurable safe patterns)
@@ -364,6 +450,7 @@ pytest tests/ --cov=phlegyas --cov-report=html
 - Prompt injection: 34 tests (injection hardening)
 - Validate Operation: 23 tests (Task agent workflow)
 - Integration: 26 tests (end-to-end + approver)
+- Slack: 35 tests (approval service, message building, concurrency)
 
 ## Performance & Cost
 
@@ -381,17 +468,41 @@ pytest tests/ --cov=phlegyas --cov-report=html
 - **<20ms avg latency** - Minimal impact on agent speed
 - **<$0.02/day** - Extremely cost-effective
 
-## Slack Integration (Optional)
+## Slack Integration
 
-For high-risk operations requiring human approval, integrate with Slack:
+When Tier 3 returns `ask_user` and Slack is configured, phlegyas escalates the decision to a human via interactive Slack messages with Approve/Deny buttons.
 
-See `examples/slack_integration.py` for implementation guide.
+### Setup
 
-**Features:**
-- Send approval requests to Slack channel
-- Approve/Deny buttons in mobile app
-- 5-minute timeout (auto-deny if no response)
-- Full audit trail
+```bash
+pip install phlegyas[slack]
+```
+
+Set three environment variables:
+```bash
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-token
+SLACK_APPROVAL_CHANNEL=approvals
+```
+
+See `examples/SLACK_SETUP.md` for full Slack App creation and configuration guide.
+
+### Behavior by Integration Mode
+
+| Mode | Slack behavior |
+|------|---------------|
+| MCP: `permissions__approve` | Blocks, waits for button click, returns `allow`/`deny` |
+| MCP: `validate_operation` | Fire-and-forget notification, returns `pending` with `request_id` |
+| Hook: PreToolUse | Fire-and-forget notification (does not block) |
+
+### Timeout
+
+Auto-denies after 300 seconds (configurable via `SLACK_APPROVAL_TIMEOUT_SECONDS` env var or `timeout_seconds` parameter).
+
+### Audit Log Labels
+
+- `tier3_slack_approved` — Human clicked Approve
+- `tier3_slack_denied` — Human clicked Deny or timed out
 
 ## Architecture
 
@@ -417,7 +528,10 @@ AI says "approve"? --> Approve with reasoning
 AI says "deny"? --> Deny with reasoning
         |
         v
-AI says "ask_user"? --> Park as pending (or deny if no escalation)
+AI says "ask_user"? --> Slack configured? --> YES --> Escalate to Slack
+        |                      |
+        v                      v NO
+Park as pending         Deny (no escalation path)
         |
         v
 Human calls submit_approval --> Return decision
