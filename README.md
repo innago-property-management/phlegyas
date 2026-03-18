@@ -256,7 +256,7 @@ Phlegyas can run as a Claude Code PreToolUse hook, providing a fast safety net f
 The hook evaluates every tool call through Tier 1 and Tier 2:
 - **Tier 1 dangerous** → blocks the tool call (returns error)
 - **Tier 2 safe** → passes silently (tool proceeds)
-- **Ambiguous** → passes through, optionally notifies Slack
+- **Ambiguous** → passes through (Tier 3 AI not evaluated)
 
 ### Setup
 
@@ -329,7 +329,7 @@ if __name__ == "__main__":
 | Tier 1 + 2 | Yes | Yes |
 | Tier 2.5 (TOFU) | No | Yes |
 | Tier 3 (AI eval) | No | Yes |
-| Slack escalation | Notify only | Block + wait |
+| Slack escalation | — | Block + wait |
 | Latency | <10ms | 200-500ms (Tier 3) |
 | Best for | Supervised agents | Print mode (`-p`) |
 
