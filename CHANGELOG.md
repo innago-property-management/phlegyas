@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-18
+
+### Added
+
+- **Slack human escalation:** When Tier 3 returns `ask_user` and Slack is configured, phlegyas escalates via interactive Approve/Deny buttons in Slack
+  - `permissions__approve`: blocks waiting for button response
+  - `validate_operation`: fire-and-forget notification with `request_id`
+  - Auto-detect: starts if `SLACK_BOT_TOKEN` set, silently disabled otherwise
+  - Thread-safe Future resolution with per-request event loop capture
+  - Auto-deny on timeout (default 300s, configurable)
+  - Audit labels: `tier3_slack_approved`, `tier3_slack_denied`
+- **PreToolUse hook guardrail:** `phlegyas-guardrail.py` for Claude Code hooks — fast Tier 1+2 evaluation without MCP overhead, ideal for supervised agent workflows
+- **README:** Hook setup guide, Slack configuration, Hook vs MCP comparison table
+
+### Removed
+
+- Legacy `approver.py` FastMCP server (dead code)
+- `fastmcp` dependency
+
+### Changed
+
+- Version now sourced dynamically from `phlegyas/__init__.py` via hatchling (single source of truth)
+- 334 tests (100% passing)
+
 ## [0.1.1] - 2026-03-16
 
 ### Fixed
@@ -25,5 +49,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSONL audit logging with credential masking
 - 299 tests (100% passing)
 
+[0.2.0]: https://github.com/innago-property-management/phlegyas/releases/tag/0.2.0
 [0.1.1]: https://github.com/innago-property-management/phlegyas/releases/tag/0.1.1
 [0.1.0]: https://github.com/innago-property-management/phlegyas/releases/tag/0.1.0
