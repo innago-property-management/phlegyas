@@ -1,0 +1,12 @@
+name: Cancel Stale PR Runs
+
+on:
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: write
+
+jobs:
+  cancel-stale:
+    uses: innago-property-management/Oui-DELIVER/.github/workflows/cancel-stale-pr-runs.yml@main
