@@ -15,14 +15,9 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from phlegyas.sanitize import sanitize_value as _sanitize_value
+
 logger = logging.getLogger(__name__)
-
-
-def _sanitize_value(value: Any) -> Any:
-    """Import and delegate to approver_mcp's _sanitize_value."""
-    from phlegyas.approver_mcp import _sanitize_value as sanitize
-
-    return sanitize(value)
 
 
 class FileQueueWriter:
@@ -81,8 +76,8 @@ class FileQueueWriter:
                 tmp_candidate = self.queue_dir / f"{pending.request_id}.json.tmp"
                 if tmp_candidate.exists():
                     tmp_candidate.unlink()
-            except Exception:
-                pass
+            except Exception as cleanup_err:
+                logger.warning(f"Failed to clean up temp file: {cleanup_err}")
             return None
 
     def resolve(self, request_id: str, resolution: str, decided_by: str) -> None:

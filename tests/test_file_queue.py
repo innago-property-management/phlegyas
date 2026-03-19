@@ -269,6 +269,20 @@ class TestFileQueueSummarizeInput:
         assert isinstance(result, str)
         assert len(result) <= 100
 
+    def test_summarize_input_sanitization_error_returns_fallback(self, monkeypatch):
+        """summarize_input should return a safe fallback if sanitization raises."""
+        import phlegyas.file_queue
+        from phlegyas.file_queue import FileQueueWriter
+
+        def boom(*_args, **_kwargs):
+            raise RuntimeError("sanitization failed")
+
+        monkeypatch.setattr(phlegyas.file_queue, "_sanitize_value", boom)
+
+        result = FileQueueWriter.summarize_input("SomeTool", {"foo": "bar"})
+        assert isinstance(result, str)
+        assert "summary unavailable" in result.lower()
+
 
 class TestFileQueueAtomicWrite:
     """Tests for atomic write behavior (tmp file renamed)."""
@@ -449,3 +463,31 @@ class TestMacOSNotifier:
         assert "Write" in notification_text
         assert "Modifying production config" in notification_text
         assert "abcdef12" in notification_text
+
+    @patch("subprocess.run")
+    def test_notify_escapes_double_quotes_in_reason(self, mock_run):
+        """Double quotes in reason must be escaped for valid AppleScript."""
+        from phlegyas.notifiers import MacOSNotifier
+
+        notifier = MacOSNotifier()
+        notifier.notify("Bash", 'Requires "production" access', "req-12345678")
+
+        cmd_list = mock_run.call_args[0][0]
+        applescript_arg = cmd_list[2]
+        # The embedded quotes should be escaped, not bare
+        assert '"production"' not in applescript_arg.split("display notification")[1].split(
+            "with title"
+        )[0].replace('\\"', "")
+        assert '\\"production\\"' in applescript_arg
+
+    @patch("subprocess.run")
+    def test_notify_escapes_backslashes_in_reason(self, mock_run):
+        """Backslashes in reason must be escaped for valid AppleScript."""
+        from phlegyas.notifiers import MacOSNotifier
+
+        notifier = MacOSNotifier()
+        notifier.notify("Bash", "path\\to\\file", "req-12345678")
+
+        cmd_list = mock_run.call_args[0][0]
+        applescript_arg = cmd_list[2]
+        assert "path\\\\to\\\\file" in applescript_arg

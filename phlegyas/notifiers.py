@@ -33,6 +33,10 @@ class MacOSNotifier:
             short_id = request_id[:8]
             msg = f"{tool_name}: {truncated_reason} (id: {short_id})"
 
+            # Escape double quotes and backslashes for AppleScript string literals
+            msg = msg.replace("\\", "\\\\").replace('"', '\\"')
+            title = title.replace("\\", "\\\\").replace('"', '\\"')
+
             subprocess.run(
                 ["osascript", "-e", f'display notification "{msg}" with title "{title}"'],
                 timeout=3,

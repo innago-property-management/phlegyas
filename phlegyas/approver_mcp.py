@@ -9,7 +9,7 @@ import hashlib
 import json
 import logging
 import os
-import re
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -20,6 +20,7 @@ from mcp.types import TextContent, Tool
 
 from phlegyas.file_queue import FileQueueWriter
 from phlegyas.notifiers import MacOSNotifier
+from phlegyas.sanitize import sanitize_value as _sanitize_value
 from phlegyas.supervisor_policy import SupervisorDelegationPolicy
 from phlegyas.tier1_dangerous import DangerousPatternDetector
 from phlegyas.tier2_5_trust import ScriptTrustStore
@@ -220,35 +221,6 @@ if macos_notifier:
 # Audit log configuration
 enable_audit_log = os.getenv("ENABLE_AUDIT_LOG", "true").lower() == "true"
 audit_log_file = os.getenv("AUDIT_LOG_FILE", "audit.jsonl")
-
-
-# Patterns for masking sensitive values in audit logs
-_SENSITIVE_PATTERNS = [
-    re.compile(r"(password\s*=\s*)(\S+)", re.IGNORECASE),
-    re.compile(r"(secret\s*=\s*)(\S+)", re.IGNORECASE),
-    re.compile(r"(api[_-]?key\s*=?\s*)(\S+)", re.IGNORECASE),
-    re.compile(r"(AWS_SECRET\S*\s*=?\s*)(\S+)", re.IGNORECASE),
-    re.compile(r"(ANTHROPIC_API_KEY\s*=?\s*)(\S+)", re.IGNORECASE),
-    re.compile(r"(Bearer\s+)(\S+)", re.IGNORECASE),
-    re.compile(r"(sk-ant-\S{4})\S+", re.IGNORECASE),
-    re.compile(r"(xoxb-\S{4})\S+", re.IGNORECASE),
-    re.compile(r"(token\s*=\s*)(\S+)", re.IGNORECASE),
-]
-
-
-def _sanitize_value(value: Any) -> Any:
-    """Recursively mask sensitive patterns in a value."""
-    if isinstance(value, str):
-        masked = value
-        for pattern in _SENSITIVE_PATTERNS:
-            masked = pattern.sub(lambda m: m.group(1) + "***REDACTED***", masked)
-        return masked
-    elif isinstance(value, dict):
-        return {k: _sanitize_value(v) for k, v in value.items()}
-    elif isinstance(value, list | tuple):
-        sanitized = [_sanitize_value(item) for item in value]
-        return type(value)(sanitized)
-    return value
 
 
 def sanitize_for_audit(input_data: dict[str, Any]) -> dict[str, Any]:
@@ -683,8 +655,6 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
     - request_id: UUID for tracking human approvals (if pending)
     - expires_at: ISO timestamp when pending approval expires (if pending)
     """
-    import uuid
-
     # Clean up expired pending approvals
     cleanup_expired_pending()
 
@@ -1089,8 +1059,9 @@ async def handle_poll_approval(arguments: dict[str, Any]) -> list[TextContent]:
     # Check resolved_approvals
     if request_id in resolved_approvals:
         resolved = resolved_approvals[request_id]
-        # Map resolution to status: "approve" -> "approved", "deny" -> "denied"
-        status = "approved" if resolved.resolution == "approve" else "denied"
+        # Map resolution to status explicitly
+        _resolution_status = {"approve": "approved", "deny": "denied", "expired": "expired"}
+        status = _resolution_status.get(resolved.resolution, resolved.resolution or "denied")
         result = {
             "found": True,
             "status": status,
@@ -1149,6 +1120,17 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
         return [TextContent(type="text", text=json.dumps(result))]
 
     pending = pending_approvals[request_id]
+
+    # Check if expired (belt-and-suspenders, matches handle_submit_approval)
+    if pending.is_expired():
+        pending_approvals.pop(request_id, None)
+        result = {
+            "success": False,
+            "error": "expired",
+            "message": f"Pending approval {request_id} has expired.",
+            "expired_at": pending.expires_at.isoformat(),
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
 
     # Run delegation policy validation
     violation = supervisor_policy.validate(pending, supervisor_id, workflow_id, decision)

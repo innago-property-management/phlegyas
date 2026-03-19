@@ -243,9 +243,10 @@ class TestPollApprovalExpired:
         result = await handle_poll_approval({"request_id": "expired-001"})
         response = json.loads(result[0].text)
 
-        # After cleanup, the request should not be found as pending
-        # (cleanup moves it out), so it should be found: false or expired
-        assert response["found"] is False or response["status"] == "expired"
+        # cleanup_expired_pending removes expired records from pending_approvals
+        # without adding them to resolved_approvals, so poll returns not found
+        assert response["found"] is False
+        assert response["status"] == "not_found"
 
     @pytest.mark.asyncio
     @pytest.mark.unit
