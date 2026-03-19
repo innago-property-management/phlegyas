@@ -18,6 +18,9 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 
+from phlegyas.file_queue import FileQueueWriter
+from phlegyas.notifiers import MacOSNotifier
+from phlegyas.supervisor_policy import SupervisorDelegationPolicy
 from phlegyas.tier1_dangerous import DangerousPatternDetector
 from phlegyas.tier2_5_trust import ScriptTrustStore
 from phlegyas.tier2_safe import SafeOperationDetector, SafePatternStore
@@ -44,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 # Initialize detectors
 dangerous_detector = DangerousPatternDetector()
+supervisor_policy = SupervisorDelegationPolicy()
 safe_pattern_store = SafePatternStore()
 safe_detector = SafeOperationDetector(user_store=safe_pattern_store)
 trust_store = ScriptTrustStore()
@@ -60,6 +64,11 @@ CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "1000"))
 pending_approvals: dict[str, "PendingApproval"] = {}
 PENDING_TTL_SECONDS = int(os.getenv("PENDING_TTL_SECONDS", "1800"))  # 30 min default
 PENDING_MAX_SIZE = int(os.getenv("PENDING_MAX_SIZE", "100"))
+
+# Resolved approvals buffer — keeps resolved records accessible for polling
+# Format: {request_id: PendingApproval} (with resolved_at, resolved_by, resolution set)
+resolved_approvals: dict[str, "PendingApproval"] = {}
+RESOLVED_TTL_SECONDS = 300  # 5 minutes — not configurable in v0.3.0
 
 # Cache metrics (reset each session — MCP server is episodic, not always-on)
 cache_metrics = {"hits": 0, "misses": 0, "expired": 0, "evictions": 0}
@@ -90,6 +99,10 @@ class PendingApproval:
         self.created_at = datetime.now(UTC)
         self.expires_at = self.created_at + timedelta(seconds=PENDING_TTL_SECONDS)
         self.status = "pending"  # pending, approved, denied, expired
+        # Resolution tracking (populated when resolved via submit_approval or supervisor_approve)
+        self.resolved_at: datetime | None = None
+        self.resolved_by: str | None = None  # "human:<id>", "supervisor:<id>", "ttl_expiry"
+        self.resolution: str | None = None  # "approved", "denied", "expired"
 
     def is_expired(self) -> bool:
         return datetime.now(UTC) > self.expires_at
@@ -110,6 +123,9 @@ class PendingApproval:
             "ttl_remaining_seconds": max(
                 0, int((self.expires_at - datetime.now(UTC)).total_seconds())
             ),
+            "resolved_at": self.resolved_at.isoformat() if self.resolved_at else None,
+            "resolved_by": self.resolved_by,
+            "resolution": self.resolution,
         }
 
 
@@ -127,6 +143,9 @@ def cleanup_expired_pending():
             f"Approval expired after {PENDING_TTL_SECONDS}s",
             pending.confidence,
         )
+        # Update file queue
+        if file_queue:
+            file_queue.resolve(req_id, "expired", "ttl_expiry")
 
     # Evict oldest if over capacity (shouldn't happen in episodic use, but defense-in-depth)
     while len(pending_approvals) > PENDING_MAX_SIZE:
@@ -141,6 +160,17 @@ def cleanup_expired_pending():
             f"Evicted: pending queue over {PENDING_MAX_SIZE} limit",
             evicted.confidence,
         )
+
+    # Clean up expired resolved approvals
+    expired_resolved = [
+        req_id
+        for req_id, resolved in resolved_approvals.items()
+        if resolved.resolved_at
+        and (datetime.now(UTC) - resolved.resolved_at).total_seconds() > RESOLVED_TTL_SECONDS
+    ]
+    for req_id in expired_resolved:
+        resolved_approvals.pop(req_id)
+        logger.debug(f"Cleaned up expired resolved approval: {req_id}")
 
 
 # Initialize AI evaluator
@@ -172,6 +202,20 @@ if _slack_available and SlackApprovalService.is_available():
         logger.warning("Human escalation via Slack will not be available")
 else:
     logger.info("Slack escalation not configured (set SLACK_BOT_TOKEN + SLACK_APP_TOKEN to enable)")
+
+# Initialize file queue for pending approvals
+_queue_enabled = os.getenv("PHLEGYAS_QUEUE_ENABLED", "true").lower() == "true"
+file_queue = FileQueueWriter() if _queue_enabled else None
+if file_queue:
+    logger.info(f"File queue enabled: {file_queue.queue_dir}")
+else:
+    logger.info("File queue disabled (PHLEGYAS_QUEUE_ENABLED=false)")
+
+# Initialize macOS notifier (opt-in, default on darwin)
+_notify_macos = os.getenv("PHLEGYAS_NOTIFY_MACOS", "true").lower() != "false"
+macos_notifier = MacOSNotifier() if _notify_macos and MacOSNotifier.is_available() else None
+if macos_notifier:
+    logger.info("macOS notifications enabled")
 
 # Audit log configuration
 enable_audit_log = os.getenv("ENABLE_AUDIT_LOG", "true").lower() == "true"
@@ -393,6 +437,20 @@ async def list_tools() -> list[Tool]:
             },
         ),
         Tool(
+            name="poll_approval",
+            description="Check the resolution status of a specific pending approval request. Returns current status including whether it has been approved, denied, or is still pending.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "request_id": {
+                        "type": "string",
+                        "description": "The request_id returned by validate_operation when status was 'pending'",
+                    },
+                },
+                "required": ["request_id"],
+            },
+        ),
+        Tool(
             name="get_pending_approvals",
             description="List all pending approval requests awaiting human decision. Returns operations that were escalated and are still within their TTL window.",
             inputSchema={
@@ -409,6 +467,37 @@ async def list_tools() -> list[Tool]:
                 },
             },
         ),
+        Tool(
+            name="supervisor_approve",
+            description="Approve, deny, or escalate a pending approval request on behalf of a supervised workflow. Enforces delegation policy constraints: cannot override Tier 1 dangerous decisions, cannot approve below confidence 0.3, and cannot approve own requests.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "request_id": {
+                        "type": "string",
+                        "description": "The request_id of the pending approval to act on",
+                    },
+                    "decision": {
+                        "type": "string",
+                        "enum": ["approve", "deny", "escalate_to_human"],
+                        "description": "Supervisor decision: approve, deny, or escalate to human",
+                    },
+                    "supervisor_id": {
+                        "type": "string",
+                        "description": "Supervisor agent identifier",
+                    },
+                    "workflow_id": {
+                        "type": "string",
+                        "description": "Must match the workflow_id on the pending request",
+                    },
+                    "reasoning": {
+                        "type": "string",
+                        "description": "Supervisor's justification for the decision",
+                    },
+                },
+                "required": ["request_id", "decision", "supervisor_id", "workflow_id"],
+            },
+        ),
     ]
 
 
@@ -423,8 +512,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         return await handle_get_approval_stats(arguments)
     elif name == "submit_approval":
         return await handle_submit_approval(arguments)
+    elif name == "poll_approval":
+        return await handle_poll_approval(arguments)
     elif name == "get_pending_approvals":
         return await handle_get_pending_approvals(arguments)
+    elif name == "supervisor_approve":
+        return await handle_supervisor_approve(arguments)
     else:
         raise ValueError(f"Unknown tool: {name}")
 
@@ -563,6 +656,21 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
         return [TextContent(type="text", text=json.dumps(result))]
 
 
+def _notify_pending(
+    pending: "PendingApproval",
+    tool_name: str,
+    input_data: dict[str, Any],
+    reason: str,
+    request_id: str,
+) -> None:
+    """Write to file queue and fire macOS notification for a new pending approval."""
+    if file_queue:
+        summary = FileQueueWriter.summarize_input(tool_name, input_data)
+        file_queue.write_pending(pending, summary)
+    if macos_notifier:
+        macos_notifier.notify(tool_name, reason[:80], request_id)
+
+
 async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextContent]:
     """
     Handle validate_operation tool call.
@@ -663,6 +771,9 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
             )
             pending_approvals[request_id] = pending
 
+            # Notify via file queue and macOS
+            _notify_pending(pending, tool_name, input_data, message, request_id)
+
             write_audit_log(tool_name, input_data, "pending", "tier3_no_ai", message)
             result = {
                 "status": "pending",
@@ -748,6 +859,9 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
                     )
                 )
 
+            # Notify via file queue and macOS
+            _notify_pending(pending, tool_name, input_data, evaluation.reasoning, request_id)
+
             write_audit_log(
                 tool_name,
                 input_data,
@@ -783,6 +897,11 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
             agent_id=agent_id,
         )
         pending_approvals[request_id] = pending
+
+        # Notify via file queue and macOS
+        _notify_pending(
+            pending, tool_name, input_data, f"AI evaluation error: {str(e)}", request_id
+        )
 
         write_audit_log(tool_name, input_data, "pending", "tier3_error", str(e))
         result = {
@@ -911,8 +1030,16 @@ async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]
         pending.confidence,
     )
 
-    # Remove from pending
+    # Move from pending to resolved_approvals buffer
+    pending.resolved_at = datetime.now(UTC)
+    pending.resolved_by = f"human:{approver_id}"
+    pending.resolution = decision  # "approve" or "deny"
     pending_approvals.pop(request_id)
+    resolved_approvals[request_id] = pending
+
+    # Update file queue
+    if file_queue:
+        file_queue.resolve(request_id, decision, f"human:{approver_id}")
 
     result = {
         "success": True,
@@ -921,6 +1048,184 @@ async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]
         "tool_name": pending.tool_name,
         "approver_id": approver_id,
         "reason": reason,
+        "workflow_id": pending.workflow_id,
+        "agent_id": pending.agent_id,
+    }
+    return [TextContent(type="text", text=json.dumps(result))]
+
+
+async def handle_poll_approval(arguments: dict[str, Any]) -> list[TextContent]:
+    """
+    Handle poll_approval tool call.
+
+    Checks the resolution status of a specific pending approval request.
+    Agents use this to poll for the outcome of a validate_operation that
+    returned status: "pending".
+    """
+    request_id = arguments["request_id"]
+
+    # Clean up expired pending and resolved approvals first
+    cleanup_expired_pending()
+
+    # Check pending_approvals
+    if request_id in pending_approvals:
+        pending = pending_approvals[request_id]
+        result = {
+            "found": True,
+            "status": "pending",
+            "decision": None,
+            "decided_by": None,
+            "decided_at": None,
+            "reason": pending.reason,
+            "confidence": pending.confidence,
+            "ttl_remaining_seconds": max(
+                0, int((pending.expires_at - datetime.now(UTC)).total_seconds())
+            ),
+            "tool_name": pending.tool_name,
+            "workflow_id": pending.workflow_id,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Check resolved_approvals
+    if request_id in resolved_approvals:
+        resolved = resolved_approvals[request_id]
+        # Map resolution to status: "approve" -> "approved", "deny" -> "denied"
+        status = "approved" if resolved.resolution == "approve" else "denied"
+        result = {
+            "found": True,
+            "status": status,
+            "decision": resolved.resolution,
+            "decided_by": resolved.resolved_by,
+            "decided_at": resolved.resolved_at.isoformat() if resolved.resolved_at else None,
+            "reason": resolved.reason,
+            "confidence": resolved.confidence,
+            "ttl_remaining_seconds": max(
+                0,
+                int(
+                    RESOLVED_TTL_SECONDS
+                    - (datetime.now(UTC) - resolved.resolved_at).total_seconds()
+                ),
+            )
+            if resolved.resolved_at
+            else 0,
+            "tool_name": resolved.tool_name,
+            "workflow_id": resolved.workflow_id,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Not found in either dict
+    result = {
+        "found": False,
+        "status": "not_found",
+    }
+    return [TextContent(type="text", text=json.dumps(result))]
+
+
+async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextContent]:
+    """
+    Handle supervisor_approve tool call.
+
+    Allows a supervisor agent to approve, deny, or escalate a pending
+    approval request from a worker within the same workflow. Enforces
+    delegation policy constraints server-side.
+    """
+    request_id = arguments["request_id"]
+    decision = arguments["decision"]  # "approve", "deny", or "escalate_to_human"
+    supervisor_id = arguments["supervisor_id"]
+    workflow_id = arguments["workflow_id"]
+    reasoning = arguments.get("reasoning", "")
+
+    # Clean up expired approvals first
+    cleanup_expired_pending()
+
+    # Look up request_id in pending_approvals (NOT resolved_approvals)
+    if request_id not in pending_approvals:
+        result = {
+            "success": False,
+            "error": "not_found",
+            "message": f"Pending approval {request_id} not found. "
+            "It may have expired, already been resolved, or never existed.",
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    pending = pending_approvals[request_id]
+
+    # Run delegation policy validation
+    violation = supervisor_policy.validate(pending, supervisor_id, workflow_id, decision)
+    if violation is not None:
+        result = {
+            "success": False,
+            "error": "policy_violation",
+            "violation_code": violation.code,
+            "message": violation.message,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Build reason string for audit
+    audit_reason = (
+        f"Supervisor {supervisor_id}: {reasoning}"
+        if reasoning
+        else f"Supervisor {supervisor_id} decision"
+    )
+
+    if decision == "escalate_to_human":
+        # Log audit but keep in pending for human to act on
+        write_audit_log(
+            pending.tool_name,
+            pending.input_data,
+            "escalated",
+            "tier3_supervisor_escalated",
+            audit_reason,
+            pending.confidence,
+        )
+
+        result = {
+            "success": True,
+            "request_id": request_id,
+            "decision": decision,
+            "supervisor_id": supervisor_id,
+            "message": "Request escalated to human. It remains pending for human review.",
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # approve or deny — resolve the request
+    final_decision = "allow" if decision == "approve" else "deny"
+    tier_label = "tier3_supervisor_approved" if decision == "approve" else "tier3_supervisor_denied"
+
+    # Update pending approval fields
+    pending.resolved_at = datetime.now(UTC)
+    pending.resolved_by = f"supervisor:{supervisor_id}"
+    pending.resolution = decision  # "approve" or "deny"
+    pending.status = "approved" if decision == "approve" else "denied"
+
+    # Move from pending to resolved
+    pending_approvals.pop(request_id)
+    resolved_approvals[request_id] = pending
+
+    # Update file queue
+    if file_queue:
+        file_queue.resolve(request_id, decision, f"supervisor:{supervisor_id}")
+
+    # Write audit log
+    write_audit_log(
+        pending.tool_name,
+        pending.input_data,
+        final_decision,
+        tier_label,
+        audit_reason,
+        pending.confidence,
+    )
+
+    logger.info(
+        f"Supervisor {supervisor_id} {decision}d request {request_id} for {pending.tool_name}"
+    )
+
+    result = {
+        "success": True,
+        "request_id": request_id,
+        "decision": decision,
+        "supervisor_id": supervisor_id,
+        "tool_name": pending.tool_name,
         "workflow_id": pending.workflow_id,
         "agent_id": pending.agent_id,
     }
