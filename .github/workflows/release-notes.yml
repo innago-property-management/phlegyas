@@ -46,8 +46,10 @@ jobs:
             echo "## What's Changed"
             echo ""
             echo "$CHANGES"
-            echo ""
-            echo "**Full Changelog**: https://github.com/${REPO}/compare/${PREV}...${TAG}"
+            if [ -n "$PREV" ] && [ "$PREV" != "$TAG" ]; then
+              echo ""
+              echo "**Full Changelog**: https://github.com/${REPO}/compare/${PREV}...${TAG}"
+            fi
           } > release_notes.md
 
       - name: Create GitHub Release
