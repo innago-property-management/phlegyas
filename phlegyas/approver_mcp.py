@@ -993,7 +993,7 @@ async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]
         pending.tool_name,
         pending.input_data,
         final_decision,
-        f"{pending.tier}_human_{decision}d",
+        f"{pending.tier}_human_{'approved' if decision == 'approve' else 'denied'}",
         f"Human decision by {approver_id}: {reason}"
         if reason
         else f"Human decision by {approver_id}",
@@ -1199,7 +1199,7 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
     )
 
     logger.info(
-        f"Supervisor {supervisor_id} {decision}d request {request_id} for {pending.tool_name}"
+        f"Supervisor {supervisor_id} {'approved' if decision == 'approve' else 'denied'} request {request_id} for {pending.tool_name}"
     )
 
     result = {

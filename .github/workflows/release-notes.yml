@@ -1,0 +1,56 @@
+name: Create GitHub Release
+
+on:
+  push:
+    tags: ["[0-9]*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+
+      - name: Get previous tag
+        id: prev_tag
+        run: |
+          PREV_TAG=$(git tag --sort=-v:refname | head -2 | tail -1)
+          echo "tag=${PREV_TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate release notes
+        id: notes
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          PREV="${{ steps.prev_tag.outputs.tag }}"
+
+          # Build changelog from merge commits since last tag
+          if [ -n "$PREV" ] && [ "$PREV" != "$TAG" ]; then
+            CHANGES=$(git log "${PREV}..${TAG}" --pretty=format:"- %s" --merges --no-decorate 2>/dev/null || true)
+            if [ -z "$CHANGES" ]; then
+              CHANGES=$(git log "${PREV}..${TAG}" --pretty=format:"- %s" --no-decorate --first-parent)
+            fi
+          else
+            CHANGES="- Initial release"
+          fi
+
+          # Write to file for gh release
+          {
+            echo "## What's Changed"
+            echo ""
+            echo "$CHANGES"
+            echo ""
+            echo "**Full Changelog**: https://github.com/${{ github.repository }}/compare/${PREV}...${TAG}"
+          } > release_notes.md
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "phlegyas $GITHUB_REF_NAME" \
+            --notes-file release_notes.md
