@@ -523,6 +523,13 @@ class TestAlternativeDestructiveCommands:
         )
         assert is_dangerous is False
 
+    def test_xargs_grep_rm_in_path_not_blocked(self, detector):
+        """xargs grep with 'rm' in the search target should NOT be blocked."""
+        is_dangerous, _reason = detector.is_dangerous(
+            "Bash", {"command": "xargs grep rm /path/to/files"}
+        )
+        assert is_dangerous is False
+
     def test_xargs_cat_not_blocked(self, detector):
         """xargs cat should NOT be blocked."""
         is_dangerous, _reason = detector.is_dangerous(

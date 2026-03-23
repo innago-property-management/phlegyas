@@ -32,8 +32,8 @@ class DangerousPatternDetector:
             r"perl\s+-e\s+.*(?:rmtree|unlink|remove)", re.IGNORECASE
         ),  # perl destructive ops
         re.compile(
-            r"xargs\s+(?:\S+\s+)*rm\b", re.IGNORECASE
-        ),  # xargs rm (rm as subcommand, handles -I{} -J% forms)
+            r"xargs\s+(?:-\S+\s+)*rm\b", re.IGNORECASE
+        ),  # xargs rm (only flag-shaped -tokens before rm, handles -I{} -J% forms)
     ]
 
     OBFUSCATION_PATTERNS = [
@@ -45,6 +45,9 @@ class DangerousPatternDetector:
         re.compile(r"printf\s+.*\|\s*(bash|sh|zsh)", re.IGNORECASE),
     ]
 
+    # TODO: Known gaps — terraform apply --destroy, kubectl delete -f <file>,
+    #   aws s3 rm --recursive, helm delete (alias for uninstall). These require
+    #   broader patterns or Tier 3 AI eval to catch reliably.
     DANGEROUS_INFRA_PATTERNS = [
         re.compile(r"terraform\s+destroy", re.IGNORECASE),
         re.compile(
