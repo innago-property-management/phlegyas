@@ -25,14 +25,17 @@ class DangerousPatternDetector:
         re.compile(r"mkfs\.", re.IGNORECASE),  # Linux format filesystem
         re.compile(r"find\s+.*-delete", re.IGNORECASE),  # find -delete
         re.compile(r"find\s+.*-exec\s+rm", re.IGNORECASE),  # find -exec rm
-        re.compile(r"python[3]?\s+-c\s+.*(?:rmtree|unlink|remove)", re.IGNORECASE),
+        re.compile(r"python\d*(?:\.\d+)?\s+-c\s+.*(?:rmtree|unlink|remove)", re.IGNORECASE),
         re.compile(r"perl\s+-e\s+.*rmtree", re.IGNORECASE),  # perl rmtree
         re.compile(r"xargs\s+.*rm\b", re.IGNORECASE),  # xargs rm
     ]
 
     OBFUSCATION_PATTERNS = [
         re.compile(r"eval\s+\$\(", re.IGNORECASE),  # eval $(...)
-        re.compile(r'eval\s+"', re.IGNORECASE),  # eval "..."
+        re.compile(
+            r'eval\s+"\$\(', re.IGNORECASE
+        ),  # eval "$(..." — not eval "$(pyenv init -)" safe forms
+        re.compile(r"eval\s+'", re.IGNORECASE),  # eval '...'
         re.compile(r"base64\s+(-d|--decode).*\|\s*(bash|sh|zsh)", re.IGNORECASE),
         re.compile(r"echo\s+-e\s+.*\|\s*(bash|sh|zsh)", re.IGNORECASE),
         re.compile(r"printf\s+.*\|\s*(bash|sh|zsh)", re.IGNORECASE),
@@ -45,7 +48,7 @@ class DangerousPatternDetector:
             re.IGNORECASE,
         ),
         re.compile(r"aws\s+s3\s+rb\s+.*--force", re.IGNORECASE),
-        re.compile(r"aws\s+.*--no-dry-run", re.IGNORECASE),
+        re.compile(r"aws\s+.*--no-dry-run", re.IGNORECASE),  # EC2 APIs only; defense-in-depth
         re.compile(r"helm\s+uninstall\s+", re.IGNORECASE),
     ]
 
