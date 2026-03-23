@@ -12,6 +12,10 @@ from typing import Any
 class DangerousPatternDetector:
     """Detects dangerous operations that should always be denied."""
 
+    # Regex for stripping known wrapper prefixes before pattern matching.
+    # Matches: env, command, nice, nohup, timeout <digits>, sudo
+    _PREFIX_RE = re.compile(r"^(?:env|command|nice|nohup|timeout\s+\d+|sudo)\s+", re.IGNORECASE)
+
     DESTRUCTIVE_PATTERNS = [
         re.compile(r"rm\s+-rf", re.IGNORECASE),
         re.compile(r"DROP\s+(TABLE|DATABASE)", re.IGNORECASE),
@@ -19,6 +23,30 @@ class DangerousPatternDetector:
         re.compile(r"TRUNCATE\s+TABLE", re.IGNORECASE),
         re.compile(r"format\s+[cC]:", re.IGNORECASE),  # Windows format drive
         re.compile(r"mkfs\.", re.IGNORECASE),  # Linux format filesystem
+        re.compile(r"find\s+.*-delete", re.IGNORECASE),  # find -delete
+        re.compile(r"find\s+.*-exec\s+rm", re.IGNORECASE),  # find -exec rm
+        re.compile(r"python[3]?\s+-c\s+.*(?:rmtree|unlink|remove)", re.IGNORECASE),
+        re.compile(r"perl\s+-e\s+.*rmtree", re.IGNORECASE),  # perl rmtree
+        re.compile(r"xargs\s+.*rm\b", re.IGNORECASE),  # xargs rm
+    ]
+
+    OBFUSCATION_PATTERNS = [
+        re.compile(r"eval\s+\$\(", re.IGNORECASE),  # eval $(...)
+        re.compile(r'eval\s+"', re.IGNORECASE),  # eval "..."
+        re.compile(r"base64\s+(-d|--decode).*\|\s*(bash|sh|zsh)", re.IGNORECASE),
+        re.compile(r"echo\s+-e\s+.*\|\s*(bash|sh|zsh)", re.IGNORECASE),
+        re.compile(r"printf\s+.*\|\s*(bash|sh|zsh)", re.IGNORECASE),
+    ]
+
+    DANGEROUS_INFRA_PATTERNS = [
+        re.compile(r"terraform\s+destroy", re.IGNORECASE),
+        re.compile(
+            r"kubectl\s+delete\s+(namespace|ns|deployment|service|pod|pv|pvc)\b",
+            re.IGNORECASE,
+        ),
+        re.compile(r"aws\s+s3\s+rb\s+.*--force", re.IGNORECASE),
+        re.compile(r"aws\s+.*--no-dry-run", re.IGNORECASE),
+        re.compile(r"helm\s+uninstall\s+", re.IGNORECASE),
     ]
 
     PRODUCTION_PATTERNS = [
@@ -87,25 +115,54 @@ class DangerousPatternDetector:
 
         return False, None
 
+    def _strip_command_prefix(self, command: str) -> str:
+        """Strip known wrapper prefixes (env, sudo, nice, etc.) iteratively.
+
+        Handles chained prefixes like 'sudo env rm -rf /'.
+        """
+        stripped = command.strip()
+        while True:
+            match = self._PREFIX_RE.match(stripped)
+            if not match:
+                break
+            stripped = stripped[match.end() :]
+        return stripped
+
     def _check_bash_command(self, command: str) -> tuple[bool, str | None]:
         """Check if bash command matches dangerous patterns."""
         if command is None:
             return False, None
 
+        # Strip wrapper prefixes so patterns match the underlying command
+        stripped = self._strip_command_prefix(command)
+
+        # Check obfuscation patterns (on original command, before stripping)
+        for pattern in self.OBFUSCATION_PATTERNS:
+            if pattern.search(command):
+                return True, f"Blocked: Command obfuscation detected - {pattern.pattern}"
+
         # Check destructive operations
         for pattern in self.DESTRUCTIVE_PATTERNS:
-            if pattern.search(command):
+            if pattern.search(stripped):
                 return True, f"Blocked: Destructive operation detected - {pattern.pattern}"
 
         # Check dangerous git operations (before production patterns so
         # "git push origin main" is caught as a git operation, not production)
         for pattern in self.DANGEROUS_GIT_PATTERNS:
-            if pattern.search(command):
+            if pattern.search(stripped):
                 return True, f"Blocked: Dangerous git operation detected - {pattern.pattern}"
+
+        # Check dangerous infrastructure operations
+        for pattern in self.DANGEROUS_INFRA_PATTERNS:
+            if pattern.search(stripped):
+                return (
+                    True,
+                    f"Blocked: Dangerous infrastructure operation detected - {pattern.pattern}",
+                )
 
         # Check production operations
         for pattern in self.PRODUCTION_PATTERNS:
-            if pattern.search(command):
+            if pattern.search(stripped):
                 return (
                     True,
                     f"Blocked: Production environment operation detected - {pattern.pattern}",
@@ -113,7 +170,7 @@ class DangerousPatternDetector:
 
         # Check network operations
         for pattern in self.NETWORK_PATTERNS:
-            if pattern.search(command):
+            if pattern.search(stripped):
                 return True, f"Blocked: Potentially dangerous network operation - {pattern.pattern}"
 
         return False, None
