@@ -26,15 +26,17 @@ class DangerousPatternDetector:
         re.compile(r"find\s+.*-delete", re.IGNORECASE),  # find -delete
         re.compile(r"find\s+.*-exec\s+rm", re.IGNORECASE),  # find -exec rm
         re.compile(r"python\d*(?:\.\d+)?\s+-c\s+.*(?:rmtree|unlink|remove)", re.IGNORECASE),
-        re.compile(r"perl\s+-e\s+.*rmtree", re.IGNORECASE),  # perl rmtree
-        re.compile(r"xargs\s+.*rm\b", re.IGNORECASE),  # xargs rm
+        re.compile(
+            r"perl\s+-e\s+.*(?:rmtree|unlink|remove)", re.IGNORECASE
+        ),  # perl destructive ops
+        re.compile(
+            r"xargs\s+(?:-[a-zA-Z0-9]+\s+)*rm\b", re.IGNORECASE
+        ),  # xargs rm (rm as subcommand)
     ]
 
     OBFUSCATION_PATTERNS = [
         re.compile(r"eval\s+\$\(", re.IGNORECASE),  # eval $(...)
-        re.compile(
-            r'eval\s+"\$\(', re.IGNORECASE
-        ),  # eval "$(..." — not eval "$(pyenv init -)" safe forms
+        re.compile(r'eval\s+"\$\(', re.IGNORECASE),  # eval "$(..." — blocks all subshell evals
         re.compile(r"eval\s+'", re.IGNORECASE),  # eval '...'
         re.compile(r"base64\s+(-d|--decode).*\|\s*(bash|sh|zsh)", re.IGNORECASE),
         re.compile(r"echo\s+-e\s+.*\|\s*(bash|sh|zsh)", re.IGNORECASE),
@@ -44,7 +46,7 @@ class DangerousPatternDetector:
     DANGEROUS_INFRA_PATTERNS = [
         re.compile(r"terraform\s+destroy", re.IGNORECASE),
         re.compile(
-            r"kubectl\s+delete\s+(namespace|ns|deployment|service|pod|pv|pvc)\b",
+            r"kubectl\s+delete\s+(namespace|ns|deployment|service|pod|pv|pvc|secret|configmap|statefulset|daemonset|ingress)\b",
             re.IGNORECASE,
         ),
         re.compile(r"aws\s+s3\s+rb\s+.*--force", re.IGNORECASE),

@@ -476,6 +476,22 @@ class TestAlternativeDestructiveCommands:
         assert is_dangerous is True
         assert "Destructive operation" in reason
 
+    def test_perl_unlink(self, detector):
+        """Should catch perl -e with unlink."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "perl -e 'unlink \"/important\"'"}
+        )
+        assert is_dangerous is True
+        assert "Destructive operation" in reason
+
+    def test_perl_remove(self, detector):
+        """Should catch perl -e with remove."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "perl -e 'remove(\"file.txt\")'"}
+        )
+        assert is_dangerous is True
+        assert "Destructive operation" in reason
+
     def test_xargs_rm(self, detector):
         """Should catch xargs rm."""
         is_dangerous, reason = detector.is_dangerous(
@@ -491,6 +507,20 @@ class TestAlternativeDestructiveCommands:
         )
         assert is_dangerous is True
         assert "Destructive operation" in reason
+
+    def test_xargs_grep_not_blocked(self, detector):
+        """xargs with a non-rm command should NOT be blocked."""
+        is_dangerous, _reason = detector.is_dangerous(
+            "Bash", {"command": 'xargs grep -l "pattern" .'}
+        )
+        assert is_dangerous is False
+
+    def test_xargs_cat_not_blocked(self, detector):
+        """xargs cat should NOT be blocked."""
+        is_dangerous, _reason = detector.is_dangerous(
+            "Bash", {"command": "find . -name '*.log' | xargs cat"}
+        )
+        assert is_dangerous is False
 
 
 class TestCommandObfuscation:
@@ -526,6 +556,12 @@ class TestCommandObfuscation:
             "Bash", {"command": 'eval "some_string_without_subshell"'}
         )
         assert is_dangerous is False
+
+    def test_eval_quoted_subshell_pyenv_is_blocked(self, detector):
+        """eval '$(pyenv init -)' IS blocked — subshell evals are always suspicious."""
+        is_dangerous, reason = detector.is_dangerous("Bash", {"command": 'eval "$(pyenv init -)"'})
+        assert is_dangerous is True
+        assert "obfuscation" in reason.lower()
 
     def test_base64_decode_pipe_bash(self, detector):
         """Should catch base64 decode piped to bash."""
@@ -647,6 +683,38 @@ class TestDangerousInfraCommands:
         """Should catch kubectl delete pvc."""
         is_dangerous, reason = detector.is_dangerous(
             "Bash", {"command": "kubectl delete pvc my-claim"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_kubectl_delete_secret(self, detector):
+        """Should catch kubectl delete secret."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "kubectl delete secret db-credentials"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_kubectl_delete_configmap(self, detector):
+        """Should catch kubectl delete configmap."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "kubectl delete configmap app-config"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_kubectl_delete_statefulset(self, detector):
+        """Should catch kubectl delete statefulset."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "kubectl delete statefulset postgres"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_kubectl_delete_ingress(self, detector):
+        """Should catch kubectl delete ingress."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "kubectl delete ingress api-gateway"}
         )
         assert is_dangerous is True
         assert "infrastructure" in reason.lower()
