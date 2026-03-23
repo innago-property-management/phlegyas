@@ -38,9 +38,15 @@ if validation["status"] == "approved":
 elif validation["status"] == "denied":
     # Skip operation and report in final output
     report(f"❌ SKIPPED: {validation['reason']}")
-elif validation["status"] == "needs_human":
-    # Mark for parent session approval
-    report(f"🔐 NEEDS_APPROVAL [request_id: {validation['request_id']}]")
+elif validation["status"] == "pending":
+    # Poll for resolution or skip and report
+    request_id = validation["request_id"]
+    # Option A: Continue other work, poll later
+    poll = await mcp__phlegyas__poll_approval(request_id=request_id)
+    if poll["status"] == "approved":
+        result = bash("npm install new-package")  # Resume
+    # Option B: Skip and report for parent session
+    report(f"🔐 NEEDS_APPROVAL [request_id: {request_id}]")
     report(f"   Operation: {tool_name} {input}")
     report(f"   Reason: {validation['reason']}")
     report(f"   Confidence: {validation['confidence']}")
@@ -50,11 +56,13 @@ elif validation["status"] == "needs_human":
 
 ```json
 {
-  "status": "approved" | "denied" | "needs_human",
+  "status": "approved" | "denied" | "pending",
   "tier": "tier1_dangerous | tier2_safe | tier2_5_trusted_script | tier3_ai_approve | tier3_ai_deny | tier3_needs_human",
   "reason": "Explanation of decision",
   "confidence": 0.85,  // Only for tier3
-  "request_id": "uuid"  // Only for needs_human
+  "request_id": "uuid",  // Only for pending
+  "expires_at": "ISO8601",  // Only for pending
+  "ttl_seconds": 1800  // Only for pending
 }
 ```
 
@@ -76,10 +84,39 @@ Task completed with 2 operations requiring approval:
    Confidence: 0.72
 ```
 
-The parent session can review these and either:
-1. Add operations to allow list and re-run
-2. Execute operations manually
-3. Decide the operations aren't needed
+The parent session or supervisor agent can:
+1. Call `submit_approval(request_id, "approve")` (human) or `supervisor_approve(request_id, "approve", ...)` (supervisor)
+2. Add operations to allow list and re-run
+3. Execute operations manually
+4. Decide the operations aren't needed
+
+### Supervisor Agent Delegation
+
+A Cygnus supervisor can approve pending requests from its workers using `supervisor_approve`:
+
+```python
+result = await mcp__phlegyas__supervisor_approve(
+    request_id="abc-123",
+    decision="approve",  # or "deny" or "escalate_to_human"
+    supervisor_id="cygnus-supervisor-001",
+    workflow_id="workflow-uuid",
+    reasoning="Operation aligns with task objectives"
+)
+```
+
+**Policy constraints (enforced server-side):**
+- `workflow_id` must match the pending request's workflow_id
+- Cannot override Tier 1 dangerous decisions
+- Cannot approve when confidence < 0.3
+- Cannot approve own requests (recursion guard)
+
+### File Queue (Non-Slack Notification)
+
+When `validate_operation` creates a pending approval, a JSON file is written to `~/.claude/pending-approvals/<request_id>.json`. This enables:
+- External tools (Pharos, scripts) to watch the directory
+- Human-readable: `ls ~/.claude/pending-approvals/` shows what's waiting
+- Cross-session visibility without Slack
+- macOS system notification fires automatically on darwin
 
 ## Development Commands
 
@@ -173,10 +210,12 @@ ruff check --fix phlegyas/ tests/
 
 ### Main Entry Point
 
-**phlegyas/approver_mcp.py** - Official MCP SDK server with five tools:
+**phlegyas/approver_mcp.py** - Official MCP SDK server with seven tools:
 - `permissions__approve` - Main permission gate (`allow`/`deny` for `--permission-prompt-tool`)
-- `validate_operation` - Pre-flight check for Task agents (`approved`/`denied`/`pending`)
+- `validate_operation` - Pre-flight check for Task agents (`approved`/`denied`/`pending`); writes to file queue + macOS notification on pending
+- `poll_approval` - Agent-oriented polling: check resolution status of a specific `request_id`
 - `submit_approval` - Human decision submission for pending approvals
+- `supervisor_approve` - Supervisor agent delegation: approve/deny/escalate within workflow policy constraints
 - `get_pending_approvals` - List pending approvals (filterable by workflow/agent ID)
 - `get_approval_stats` - Audit log statistics
 
@@ -203,6 +242,9 @@ ruff check --fix phlegyas/ tests/
 - `CACHE_TTL_SECONDS` (default: `3600`) - TTL for Tier 3 decision cache
 - `ENABLE_APPROVAL_CACHE` (default: `true`) - Enable caching of Tier 3 decisions
 - `PENDING_TTL_SECONDS` (default: `1800`) - TTL for pending human approvals
+- `PHLEGYAS_QUEUE_ENABLED` (default: `true`) - Enable file-based pending approval queue
+- `PHLEGYAS_QUEUE_DIR` (default: `~/.claude/pending-approvals`) - File queue directory
+- `PHLEGYAS_NOTIFY_MACOS` (default: `true` on darwin) - Enable macOS system notifications
 
 **Project Context (improves AI decisions):**
 - `PROJECT_NAME` (default: `Unknown`) - Your project name
@@ -350,10 +392,15 @@ If no human clicks Approve or Deny within the timeout window (default: 300 secon
 
 ### Audit Log Tier Labels
 
-Slack-resolved decisions appear in `audit.jsonl` with these tier values:
+Approval decisions appear in `audit.jsonl` with these tier values:
 
-- `tier3_slack_approved` — Human clicked Approve
-- `tier3_slack_denied` — Human clicked Deny (or request timed out)
+- `tier3_slack_approved` — Human clicked Approve in Slack
+- `tier3_slack_denied` — Human clicked Deny in Slack (or request timed out)
+- `tier3_supervisor_approved` — Supervisor agent approved within policy
+- `tier3_supervisor_denied` — Supervisor agent denied
+- `tier3_supervisor_escalated` — Supervisor escalated to human
+- `tier3_needs_human_human_approved` — Human approved via `submit_approval`
+- `tier3_needs_human_human_denied` — Human denied via `submit_approval`
 
 ### Setup Guide
 
@@ -361,7 +408,7 @@ See `examples/SLACK_SETUP.md` for full Slack App creation, scopes, Socket Mode c
 
 ## Testing Strategy
 
-**299 tests, 100% passing.**
+**436 tests, 100% passing.**
 
 **Test Files:**
 - `tests/test_tier1_dangerous.py` - Dangerous pattern detection (32 tests)
@@ -372,6 +419,10 @@ See `examples/SLACK_SETUP.md` for full Slack App creation, scopes, Socket Mode c
 - `tests/test_c3_prompt_injection.py` - Prompt injection hardening (34 tests)
 - `tests/test_validate_operation.py` - Task agent validation workflow (23 tests)
 - `tests/test_approver.py` - Integration tests (26 tests)
+- `tests/test_poll_approval.py` - Agent polling for approval resolution (22 tests)
+- `tests/test_file_queue.py` - File queue writer + macOS notifier (33 tests)
+- `tests/test_supervisor_approve.py` - Supervisor delegation MCP tool (30 tests)
+- `tests/test_supervisor_policy.py` - Supervisor delegation policy (17 tests)
 - `tests/conftest.py` - Shared fixtures and test data
 
 **Key Fixtures (conftest.py):**
@@ -526,21 +577,30 @@ tail /Volumes/Repos/phlegyas/audit.jsonl
 
 ```
 phlegyas/
-  approver_mcp.py          # Main MCP server (official SDK) with permissions__approve() tool
+  approver_mcp.py          # Main MCP server (official SDK) with seven MCP tools
   tier1_dangerous.py       # Tier 1: Dangerous pattern detection (regex-based)
   tier2_safe.py            # Tier 2: Safe operation detection (regex-based)
   tier2_5_trust.py         # Tier 2.5: Script trust store (TOFU + content hashing)
   tier3_ai.py              # Tier 3: AI evaluation with Claude (Haiku/Sonnet)
+  file_queue.py            # File-based pending approval queue (~/.claude/pending-approvals/)
+  notifiers.py             # macOS system notifications via osascript
+  supervisor_policy.py     # Supervisor delegation policy enforcement
   trust_cli.py             # CLI for managing trusted scripts (phlegyas-trust)
 
 tests/
-  conftest.py                # Shared fixtures and test data
-  test_tier1_dangerous.py    # Tier 1 tests
-  test_tier2_safe.py         # Tier 2 tests
-  test_tier2_5_trust.py      # Tier 2.5 tests
-  test_tier3_ai.py           # Tier 3 tests
-  test_validate_operation.py # Validate operation (Task agent) tests
-  test_approver.py           # Integration tests
+  conftest.py                  # Shared fixtures and test data
+  test_tier1_dangerous.py      # Tier 1 tests
+  test_tier2_safe.py           # Tier 2 tests
+  test_tier2_safe_custom.py    # Custom safe patterns tests
+  test_tier2_5_trust.py        # Tier 2.5 tests
+  test_tier3_ai.py             # Tier 3 tests
+  test_c3_prompt_injection.py  # Prompt injection hardening tests
+  test_validate_operation.py   # Validate operation (Task agent) tests
+  test_approver.py             # Integration tests
+  test_poll_approval.py        # Agent polling tests
+  test_file_queue.py           # File queue + macOS notifier tests
+  test_supervisor_approve.py   # Supervisor delegation tool tests
+  test_supervisor_policy.py    # Supervisor policy unit tests
 
 audit.jsonl              # Audit log (JSONL format, gitignored)
 .env                     # Environment variables (gitignored)
