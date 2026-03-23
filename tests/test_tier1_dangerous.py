@@ -508,6 +508,14 @@ class TestAlternativeDestructiveCommands:
         assert is_dangerous is True
         assert "Destructive operation" in reason
 
+    def test_xargs_I_rm_blocked(self, detector):
+        """xargs -I{} rm {} (without -rf) should still be blocked."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "find . | xargs -I{} rm {}"}
+        )
+        assert is_dangerous is True
+        assert "Destructive operation" in reason
+
     def test_xargs_grep_not_blocked(self, detector):
         """xargs with a non-rm command should NOT be blocked."""
         is_dangerous, _reason = detector.is_dangerous(

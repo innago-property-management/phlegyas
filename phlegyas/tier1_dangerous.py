@@ -14,7 +14,9 @@ class DangerousPatternDetector:
 
     # Regex for stripping known wrapper prefixes before pattern matching.
     # Matches: env, command, nice, nohup, timeout <digits>, sudo
-    _PREFIX_RE = re.compile(r"^(?:env|command|nice|nohup|timeout\s+\d+|sudo)\s+", re.IGNORECASE)
+    _PREFIX_RE = re.compile(
+        r"^(?:env|command|nice|nohup|timeout\s+\d+[smhd]?|sudo)\s+", re.IGNORECASE
+    )
 
     DESTRUCTIVE_PATTERNS = [
         re.compile(r"rm\s+-rf", re.IGNORECASE),
@@ -30,8 +32,8 @@ class DangerousPatternDetector:
             r"perl\s+-e\s+.*(?:rmtree|unlink|remove)", re.IGNORECASE
         ),  # perl destructive ops
         re.compile(
-            r"xargs\s+(?:-[a-zA-Z0-9]+\s+)*rm\b", re.IGNORECASE
-        ),  # xargs rm (rm as subcommand)
+            r"xargs\s+(?:\S+\s+)*rm\b", re.IGNORECASE
+        ),  # xargs rm (rm as subcommand, handles -I{} -J% forms)
     ]
 
     OBFUSCATION_PATTERNS = [
