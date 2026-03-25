@@ -16,11 +16,13 @@ jobs:
     with:
       allow_approve: true
       additional_context: |
-        This is a TypeScript/Node.js project (cygnus-anamnesis — the memory/knowledge
-        layer for Cygnus AI agents). Focus on:
-        - TypeScript strict mode compliance
-        - Proper async/await and error handling
-        - Jest test patterns and mock correctness
-        - OTel instrumentation completeness
+        phlegyas is an MCP server that provides AI-powered permission approval for
+        Claude Code using a three-tier intelligent evaluation system. It enables
+        autonomous multi-agent workflows by automatically approving safe operations
+        while blocking dangerous ones.
+        Core Architecture: Three-tier evaluation pipeline
+        - Tier 1 (Dangerous): Instant denial using regex pattern matching for destructive operations
+        - Tier 2 (Safe): Instant approval for known-safe operations (read-only tools, tests, builds)
+        - Tier 3 (AI): Claude AI evaluation for ambiguous cases with confidence thresholds
     secrets:
       anthropicKey: ${{ secrets.ANTHROPIC_API_KEY }}
