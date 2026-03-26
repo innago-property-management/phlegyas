@@ -17,12 +17,31 @@ import json
 import os
 import re
 import secrets
+from enum import StrEnum
 from typing import Any
 
 from anthropic import Anthropic
 from pydantic import BaseModel
 
 from phlegyas.tier1_dangerous import DangerousPatternDetector
+
+
+class Decision(StrEnum):
+    """Possible AI evaluation decisions."""
+
+    APPROVE = "approve"
+    DENY = "deny"
+    ASK_USER = "ask_user"
+
+
+class Category(StrEnum):
+    """Risk categories for evaluated operations."""
+
+    BENIGN = "benign"
+    MODERATE_RISK = "moderate_risk"
+    HIGH_RISK = "high_risk"
+    CRITICAL = "critical"
+
 
 INPUT_MAX_LENGTH = 4000
 
@@ -68,8 +87,8 @@ CONFIDENCE_CAPS: dict[str, tuple[float, list[re.Pattern[str]]]] = {
 class EvaluationResult(BaseModel):
     """Result of AI evaluation."""
 
-    decision: str  # "approve", "deny", or "ask_user"
-    category: str  # "benign", "moderate_risk", "high_risk", "critical"
+    decision: Decision  # "approve", "deny", or "ask_user"
+    category: Category  # "benign", "moderate_risk", "high_risk", "critical"
     reasoning: str
     confidence: float  # 0.0-1.0
     suggested_message: str | None = None
@@ -95,10 +114,10 @@ class AIEvaluator:
         self.denial_threshold = denial_threshold
         self.tier1_detector = DangerousPatternDetector()
 
-        # Project context (can be overridden)
-        self.project_name = os.getenv("PROJECT_NAME", "Unknown")
-        self.project_type = os.getenv("PROJECT_TYPE", "Software project")
-        self.current_task = os.getenv("CURRENT_TASK", "Development work")
+        # Project context (can be overridden) — truncated to prevent context poisoning
+        self.project_name = os.getenv("PROJECT_NAME", "Unknown")[:200]
+        self.project_type = os.getenv("PROJECT_TYPE", "Software project")[:200]
+        self.current_task = os.getenv("CURRENT_TASK", "Development work")[:200]
 
     def close(self):
         """Close the underlying HTTP client to release connections."""
@@ -133,15 +152,15 @@ class AIEvaluator:
             # confidence caps cannot convert a dangerous-approve into ask_user
             # instead of deny. If Tier 1 says it's dangerous, it's always deny.
             is_dangerous, tier1_reason = self.tier1_detector.is_dangerous(tool_name, input_data)
-            if is_dangerous and evaluation.decision != "deny":
+            if is_dangerous and evaluation.decision != Decision.DENY:
                 original_reasoning = evaluation.reasoning
-                evaluation.decision = "deny"
+                evaluation.decision = Decision.DENY
                 evaluation.confidence = 0.0
                 evaluation.reasoning = (
                     f"Tier 1 post-hoc safety check override: {tier1_reason} "
                     f"(AI had approved with reasoning: {original_reasoning})"
                 )
-                return "deny", evaluation
+                return Decision.DENY, evaluation
 
             # Defense: Confidence caps by operation type
             evaluation = self._apply_confidence_caps(evaluation, tool_name, input_data)
@@ -153,9 +172,9 @@ class AIEvaluator:
 
         except Exception as e:
             # If AI evaluation fails, escalate to human
-            return "ask_user", EvaluationResult(
-                decision="ask_user",
-                category="critical",
+            return Decision.ASK_USER, EvaluationResult(
+                decision=Decision.ASK_USER,
+                category=Category.CRITICAL,
                 reasoning=f"AI evaluation failed: {str(e)}",
                 confidence=0.0,
                 suggested_message="AI evaluation service unavailable - manual approval required",
@@ -295,16 +314,16 @@ Use the security_evaluation tool to submit your assessment."""
                     return EvaluationResult(**block.input)
                 except Exception:
                     return EvaluationResult(
-                        decision="ask_user",
-                        category="moderate_risk",
+                        decision=Decision.ASK_USER,
+                        category=Category.MODERATE_RISK,
                         reasoning="Malformed tool_use response from AI",
                         confidence=0.5,
                     )
 
         # Fallback: no tool_use block found
         return EvaluationResult(
-            decision="ask_user",
-            category="moderate_risk",
+            decision=Decision.ASK_USER,
+            category=Category.MODERATE_RISK,
             reasoning="No structured evaluation in AI response",
             confidence=0.5,
         )
@@ -319,7 +338,7 @@ Use the security_evaluation tool to submit your assessment."""
 
         Only caps approve decisions — deny and ask_user are not affected.
         """
-        if evaluation.decision != "approve":
+        if evaluation.decision != Decision.APPROVE:
             return evaluation
 
         # Stringify all input for pattern matching
@@ -344,22 +363,25 @@ Use the security_evaluation tool to submit your assessment."""
         """Apply confidence thresholds to AI decision."""
 
         # If AI says approve but confidence is low, escalate to human
-        if evaluation.decision == "approve" and evaluation.confidence < self.approval_threshold:
-            return "ask_user"
+        if (
+            evaluation.decision == Decision.APPROVE
+            and evaluation.confidence < self.approval_threshold
+        ):
+            return Decision.ASK_USER
 
         # If AI says deny but confidence is low, escalate to human
-        if evaluation.decision == "deny" and evaluation.confidence < self.approval_threshold:
-            return "ask_user"
+        if evaluation.decision == Decision.DENY and evaluation.confidence < self.approval_threshold:
+            return Decision.ASK_USER
 
         # For critical operations, always escalate unless very high confidence
-        if evaluation.category == "critical" and evaluation.confidence < 0.95:
-            return "ask_user"
+        if evaluation.category == Category.CRITICAL and evaluation.confidence < 0.95:
+            return Decision.ASK_USER
 
         return evaluation.decision
 
     def update_context(self, project_name: str | None = None, current_task: str | None = None):
         """Update project context for better evaluations."""
         if project_name:
-            self.project_name = project_name
+            self.project_name = project_name[:200]
         if current_task:
-            self.current_task = current_task
+            self.current_task = current_task[:200]

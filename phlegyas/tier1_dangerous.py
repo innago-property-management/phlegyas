@@ -45,18 +45,22 @@ class DangerousPatternDetector:
         re.compile(r"printf\s+.*\|\s*(bash|sh|zsh)", re.IGNORECASE),
     ]
 
-    # TODO: Known gaps — terraform apply --destroy, kubectl delete -f <file>,
-    #   aws s3 rm --recursive, helm delete (alias for uninstall). These require
-    #   broader patterns or Tier 3 AI eval to catch reliably.
     DANGEROUS_INFRA_PATTERNS = [
         re.compile(r"terraform\s+destroy", re.IGNORECASE),
+        re.compile(
+            r"terraform\s+apply\s+.*-destroy", re.IGNORECASE
+        ),  # terraform apply --destroy / -destroy
         re.compile(
             r"kubectl\s+delete\s+(namespace|ns|deployment|service|pod|pv|pvc|secret|configmap|statefulset|daemonset|ingress)\b",
             re.IGNORECASE,
         ),
+        re.compile(
+            r"kubectl\s+delete\s+(-f\s|--filename[=\s])", re.IGNORECASE
+        ),  # kubectl delete -f <file>
         re.compile(r"aws\s+s3\s+rb\s+.*--force", re.IGNORECASE),
+        re.compile(r"aws\s+s3\s+rm\s+.*--recursive", re.IGNORECASE),  # aws s3 rm --recursive
         re.compile(r"aws\s+.*--no-dry-run", re.IGNORECASE),  # EC2 APIs only; defense-in-depth
-        re.compile(r"helm\s+uninstall\s+", re.IGNORECASE),
+        re.compile(r"helm\s+(uninstall|delete)\s+", re.IGNORECASE),  # helm uninstall / helm delete
     ]
 
     PRODUCTION_PATTERNS = [

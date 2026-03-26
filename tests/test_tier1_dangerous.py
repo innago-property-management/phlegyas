@@ -765,3 +765,103 @@ class TestDangerousInfraCommands:
         )
         assert is_dangerous is True
         assert "infrastructure" in reason.lower()
+
+    # --- Gap patterns: terraform apply --destroy ---
+
+    def test_terraform_apply_destroy_double_dash(self, detector):
+        """Should catch terraform apply --destroy (alias for terraform destroy)."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "terraform apply --destroy -auto-approve"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_terraform_apply_destroy_single_dash(self, detector):
+        """Should catch terraform apply -destroy."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "terraform apply -destroy"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_terraform_apply_destroy_with_plan_file(self, detector):
+        """Should catch terraform apply -destroy with a plan file."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "terraform apply -destroy tfplan"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    # --- Gap patterns: kubectl delete -f <file> ---
+
+    def test_kubectl_delete_f_file(self, detector):
+        """Should catch kubectl delete -f deployment.yaml."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "kubectl delete -f deployment.yaml"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_kubectl_delete_f_stdin(self, detector):
+        """Should catch kubectl delete -f - (stdin)."""
+        is_dangerous, reason = detector.is_dangerous("Bash", {"command": "kubectl delete -f -"})
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_kubectl_delete_f_url(self, detector):
+        """Should catch kubectl delete -f with a URL."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "kubectl delete -f https://example.com/manifest.yaml"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_kubectl_delete_filename_long_flag(self, detector):
+        """Should catch kubectl delete --filename=manifest.yaml."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "kubectl delete --filename=manifest.yaml"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    # --- Gap patterns: aws s3 rm --recursive ---
+
+    def test_aws_s3_rm_recursive(self, detector):
+        """Should catch aws s3 rm s3://bucket --recursive."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "aws s3 rm s3://my-bucket --recursive"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_aws_s3_rm_recursive_with_prefix(self, detector):
+        """Should catch aws s3 rm s3://bucket/prefix/ --recursive."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "aws s3 rm s3://my-bucket/data/ --recursive"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_aws_s3_rm_recursive_before_path(self, detector):
+        """Should catch aws s3 rm --recursive s3://bucket."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "aws s3 rm --recursive s3://my-bucket"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    # --- Gap patterns: helm delete (alias for uninstall) ---
+
+    def test_helm_delete(self, detector):
+        """Should catch helm delete (alias for helm uninstall)."""
+        is_dangerous, reason = detector.is_dangerous("Bash", {"command": "helm delete my-release"})
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
+
+    def test_helm_delete_namespace(self, detector):
+        """Should catch helm delete with namespace."""
+        is_dangerous, reason = detector.is_dangerous(
+            "Bash", {"command": "helm delete my-release -n my-namespace"}
+        )
+        assert is_dangerous is True
+        assert "infrastructure" in reason.lower()
