@@ -795,3 +795,26 @@ class TestInjectionOnNonTier1Commands:
         # And NOT outside the tags (before the opening tag)
         before_tag = user[: user.index("<UNTRUSTED_INPUT_")]
         assert injection not in before_tag
+
+
+class TestUpdateContextTruncation:
+    """Verify update_context() applies the same 200-char truncation as __init__."""
+
+    @pytest.fixture
+    def evaluator(self, mock_env_vars):
+        return AIEvaluator(api_key="sk-ant-test-key")
+
+    def test_update_context_truncates_project_name(self, evaluator):
+        long_name = "A" * 300
+        evaluator.update_context(project_name=long_name)
+        assert len(evaluator.project_name) == 200
+
+    def test_update_context_truncates_current_task(self, evaluator):
+        long_task = "B" * 300
+        evaluator.update_context(current_task=long_task)
+        assert len(evaluator.current_task) == 200
+
+    def test_update_context_preserves_short_values(self, evaluator):
+        evaluator.update_context(project_name="short", current_task="also short")
+        assert evaluator.project_name == "short"
+        assert evaluator.current_task == "also short"

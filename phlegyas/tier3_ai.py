@@ -382,6 +382,6 @@ Use the security_evaluation tool to submit your assessment."""
     def update_context(self, project_name: str | None = None, current_task: str | None = None):
         """Update project context for better evaluations."""
         if project_name:
-            self.project_name = project_name
+            self.project_name = project_name[:200]
         if current_task:
-            self.current_task = current_task
+            self.current_task = current_task[:200]

@@ -213,6 +213,7 @@ approval_cache = state.approval_cache
 cache_metrics = state.cache_metrics
 
 # Instance aliases for conftest.py cleanup
+# Snapshot — tests must patch state.ai_evaluator directly, not this alias
 ai_evaluator = state.ai_evaluator
 
 
@@ -759,7 +760,8 @@ def _validate_create_pending(
     if request_id is None:
         request_id = str(uuid.uuid4())
 
-    getattr(logger, log_level)(f"PENDING (Tier 3): {reason}")
+    log_fn = getattr(logger, log_level, logger.warning)
+    log_fn(f"PENDING (Tier 3): {reason}")
 
     pending = PendingApproval(
         request_id=request_id,
@@ -816,6 +818,9 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
     operation_hash = compute_operation_hash(tool_name, input_data)
     cached = get_cached_decision(operation_hash)
 
+    # Cache check before full pipeline: safe because the cache key includes
+    # tool_name + input_data hash, so the same operation always produces the
+    # same Tier 1/2 result. Newly-added patterns won't apply until TTL expires.
     if cached is not None:
         # Cache hit — use cached Tier 3 decision (skip Tiers 1-2.5 re-evaluation)
         decision, evaluation, cached_time = cached
@@ -826,6 +831,14 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
             reason=evaluation.reasoning,
             confidence=evaluation.confidence,
             evaluation=evaluation,
+        )
+        write_audit_log(
+            tool_name,
+            input_data,
+            tier_result.decision,
+            tier_result.tier,
+            tier_result.reason,
+            tier_result.confidence,
         )
     else:
         # Cache miss — run full pipeline
