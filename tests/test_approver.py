@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from phlegyas.approver_mcp import write_audit_log
+from phlegyas.approver_mcp import state, write_audit_log
 from phlegyas.tier1_dangerous import DangerousPatternDetector
 from phlegyas.tier2_safe import SafeOperationDetector
 from phlegyas.tier3_ai import AIEvaluator
@@ -178,8 +178,8 @@ class TestPermissionApprovalFlow:
         """Should write audit log entries correctly."""
         audit_file = tmp_path / "test_audit.jsonl"
 
-        with patch("phlegyas.approver_mcp.audit_log_file", str(audit_file)):
-            with patch("phlegyas.approver_mcp.enable_audit_log", True):
+        with patch.object(state, "audit_log_file", str(audit_file)):
+            with patch.object(state, "enable_audit_log", True):
                 write_audit_log(
                     tool_name="Bash",
                     input_data={"command": "ls -la"},
@@ -200,8 +200,8 @@ class TestPermissionApprovalFlow:
         """Should not write audit log when disabled."""
         audit_file = tmp_path / "test_audit.jsonl"
 
-        with patch("phlegyas.approver_mcp.audit_log_file", str(audit_file)):
-            with patch("phlegyas.approver_mcp.enable_audit_log", False):
+        with patch.object(state, "audit_log_file", str(audit_file)):
+            with patch.object(state, "enable_audit_log", False):
                 write_audit_log(
                     tool_name="Bash",
                     input_data={"command": "test"},

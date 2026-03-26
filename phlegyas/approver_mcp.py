@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -46,33 +47,15 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize detectors
-dangerous_detector = DangerousPatternDetector()
-supervisor_policy = SupervisorDelegationPolicy()
-safe_pattern_store = SafePatternStore()
-safe_detector = SafeOperationDetector(user_store=safe_pattern_store)
-trust_store = ScriptTrustStore()
-
-# Approval cache for Tier 3 decisions (improves performance for repeated operations)
-# Cache format: {operation_hash: (decision, evaluation_result, timestamp)}
-approval_cache = {}
+# ---------------------------------------------------------------------------
+# Constants — kept at module level for backward-compatible test imports
+# ---------------------------------------------------------------------------
 CACHE_TTL_SECONDS = int(os.getenv("CACHE_TTL_SECONDS", "3600"))  # 1 hour default
 CACHE_ENABLED = os.getenv("ENABLE_APPROVAL_CACHE", "true").lower() == "true"
 CACHE_MAX_SIZE = int(os.getenv("CACHE_MAX_SIZE", "1000"))
-
-# Pending approvals store for async human approval workflow
-# Format: {request_id: PendingApproval}
-pending_approvals: dict[str, "PendingApproval"] = {}
 PENDING_TTL_SECONDS = int(os.getenv("PENDING_TTL_SECONDS", "1800"))  # 30 min default
 PENDING_MAX_SIZE = int(os.getenv("PENDING_MAX_SIZE", "100"))
-
-# Resolved approvals buffer — keeps resolved records accessible for polling
-# Format: {request_id: PendingApproval} (with resolved_at, resolved_by, resolution set)
-resolved_approvals: dict[str, "PendingApproval"] = {}
 RESOLVED_TTL_SECONDS = 300  # 5 minutes — not configurable in v0.3.0
-
-# Cache metrics (reset each session — MCP server is episodic, not always-on)
-cache_metrics = {"hits": 0, "misses": 0, "expired": 0, "evictions": 0}
 
 
 class PendingApproval:
@@ -88,6 +71,7 @@ class PendingApproval:
         tier: str,
         workflow_id: str | None = None,
         agent_id: str | None = None,
+        pending_ttl_seconds: int = 1800,
     ):
         self.request_id = request_id
         self.tool_name = tool_name
@@ -98,7 +82,7 @@ class PendingApproval:
         self.workflow_id = workflow_id
         self.agent_id = agent_id
         self.created_at = datetime.now(UTC)
-        self.expires_at = self.created_at + timedelta(seconds=PENDING_TTL_SECONDS)
+        self.expires_at = self.created_at + timedelta(seconds=pending_ttl_seconds)
         self.status = "pending"  # pending, approved, denied, expired
         # Resolution tracking (populated when resolved via submit_approval or supervisor_approve)
         self.resolved_at: datetime | None = None
@@ -130,97 +114,155 @@ class PendingApproval:
         }
 
 
+class ApproverState:
+    """Encapsulates all mutable server state and detector/service instances.
+
+    A single module-level instance is created at import time (preserving current
+    behaviour).  Tests can create fresh instances for isolation.
+    """
+
+    def __init__(self) -> None:
+        # -- Detectors --
+        self.dangerous_detector = DangerousPatternDetector()
+        self.supervisor_policy = SupervisorDelegationPolicy()
+        safe_pattern_store = SafePatternStore()
+        self.safe_detector = SafeOperationDetector(user_store=safe_pattern_store)
+        self.trust_store = ScriptTrustStore()
+
+        # -- AI evaluator --
+        self.ai_evaluator: AIEvaluator | None = None
+        try:
+            model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+            approval_threshold = float(os.getenv("APPROVAL_CONFIDENCE_THRESHOLD", "0.8"))
+            denial_threshold = float(os.getenv("DENIAL_CONFIDENCE_THRESHOLD", "0.2"))
+            self.ai_evaluator = AIEvaluator(
+                model=model,
+                approval_threshold=approval_threshold,
+                denial_threshold=denial_threshold,
+            )
+            logger.info(f"AI evaluator initialized with model: {model}")
+        except Exception as e:
+            logger.warning(f"AI evaluator initialization failed: {e}")
+            logger.warning("Only Tier 1 (dangerous) and Tier 2 (safe) will be available")
+
+        # -- Slack escalation (optional) --
+        self.slack_service = None
+        if _slack_available and SlackApprovalService.is_available():
+            try:
+                self.slack_service = SlackApprovalService()
+                self.slack_service.start_background()
+                logger.info("Slack escalation service initialized and connected")
+            except Exception as e:
+                logger.warning(f"Slack service initialization failed: {e}")
+                logger.warning("Human escalation via Slack will not be available")
+        else:
+            logger.info(
+                "Slack escalation not configured (set SLACK_BOT_TOKEN + SLACK_APP_TOKEN to enable)"
+            )
+
+        # -- File queue & macOS notifier --
+        _queue_enabled = os.getenv("PHLEGYAS_QUEUE_ENABLED", "true").lower() == "true"
+        self.file_queue: FileQueueWriter | None = FileQueueWriter() if _queue_enabled else None
+        if self.file_queue:
+            logger.info(f"File queue enabled: {self.file_queue.queue_dir}")
+        else:
+            logger.info("File queue disabled (PHLEGYAS_QUEUE_ENABLED=false)")
+
+        _notify_macos = os.getenv("PHLEGYAS_NOTIFY_MACOS", "true").lower() != "false"
+        self.macos_notifier: MacOSNotifier | None = (
+            MacOSNotifier() if _notify_macos and MacOSNotifier.is_available() else None
+        )
+        if self.macos_notifier:
+            logger.info("macOS notifications enabled")
+
+        # -- Audit config --
+        self.enable_audit_log: bool = os.getenv("ENABLE_AUDIT_LOG", "true").lower() == "true"
+        self.audit_log_file: str = os.getenv("AUDIT_LOG_FILE", "audit.jsonl")
+
+        # -- Cache config (mirrors module-level constants for instance isolation) --
+        self.cache_ttl_seconds: int = CACHE_TTL_SECONDS
+        self.cache_enabled: bool = CACHE_ENABLED
+        self.cache_max_size: int = CACHE_MAX_SIZE
+
+        # -- Pending config --
+        self.pending_ttl_seconds: int = PENDING_TTL_SECONDS
+        self.pending_max_size: int = PENDING_MAX_SIZE
+        self.resolved_ttl_seconds: int = RESOLVED_TTL_SECONDS
+
+        # -- Mutable state --
+        self.approval_cache: dict[str, tuple[str, Any, datetime]] = {}
+        self.pending_approvals: dict[str, PendingApproval] = {}
+        self.resolved_approvals: dict[str, PendingApproval] = {}
+        self.cache_metrics: dict[str, int] = {
+            "hits": 0,
+            "misses": 0,
+            "expired": 0,
+            "evictions": 0,
+        }
+
+
+# ---------------------------------------------------------------------------
+# Module-level singleton + backward-compatible aliases
+# ---------------------------------------------------------------------------
+state = ApproverState()
+
+# Dict aliases — same object, so test code doing pending_approvals.clear() works
+pending_approvals = state.pending_approvals
+resolved_approvals = state.resolved_approvals
+approval_cache = state.approval_cache
+cache_metrics = state.cache_metrics
+
+# Instance aliases for conftest.py cleanup
+ai_evaluator = state.ai_evaluator
+
+
 def cleanup_expired_pending():
     """Remove expired pending approvals and enforce max size."""
-    expired = [req_id for req_id, pending in pending_approvals.items() if pending.is_expired()]
+    expired = [
+        req_id for req_id, pending in state.pending_approvals.items() if pending.is_expired()
+    ]
     for req_id in expired:
-        pending = pending_approvals.pop(req_id)
+        pending = state.pending_approvals.pop(req_id)
         logger.info(f"Expired pending approval: {req_id} for {pending.tool_name}")
         write_audit_log(
             pending.tool_name,
             pending.input_data,
             "expired",
             pending.tier,
-            f"Approval expired after {PENDING_TTL_SECONDS}s",
+            f"Approval expired after {state.pending_ttl_seconds}s",
             pending.confidence,
         )
-        # Update file queue
-        if file_queue:
-            file_queue.resolve(req_id, "expired", "ttl_expiry")
+        if state.file_queue:
+            state.file_queue.resolve(req_id, "expired", "ttl_expiry")
 
     # Evict oldest if over capacity (shouldn't happen in episodic use, but defense-in-depth)
-    while len(pending_approvals) > PENDING_MAX_SIZE:
-        oldest_id = min(pending_approvals, key=lambda k: pending_approvals[k].created_at)
-        evicted = pending_approvals.pop(oldest_id)
-        logger.warning(f"Evicted pending approval (over {PENDING_MAX_SIZE} limit): {oldest_id}")
+    while len(state.pending_approvals) > state.pending_max_size:
+        oldest_id = min(
+            state.pending_approvals, key=lambda k: state.pending_approvals[k].created_at
+        )
+        evicted = state.pending_approvals.pop(oldest_id)
+        logger.warning(
+            f"Evicted pending approval (over {state.pending_max_size} limit): {oldest_id}"
+        )
         write_audit_log(
             evicted.tool_name,
             evicted.input_data,
             "evicted",
             evicted.tier,
-            f"Evicted: pending queue over {PENDING_MAX_SIZE} limit",
+            f"Evicted: pending queue over {state.pending_max_size} limit",
             evicted.confidence,
         )
 
     # Clean up expired resolved approvals
     expired_resolved = [
         req_id
-        for req_id, resolved in resolved_approvals.items()
+        for req_id, resolved in state.resolved_approvals.items()
         if resolved.resolved_at
-        and (datetime.now(UTC) - resolved.resolved_at).total_seconds() > RESOLVED_TTL_SECONDS
+        and (datetime.now(UTC) - resolved.resolved_at).total_seconds() > state.resolved_ttl_seconds
     ]
     for req_id in expired_resolved:
-        resolved_approvals.pop(req_id)
+        state.resolved_approvals.pop(req_id)
         logger.debug(f"Cleaned up expired resolved approval: {req_id}")
-
-
-# Initialize AI evaluator
-ai_evaluator = None
-try:
-    model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-    approval_threshold = float(os.getenv("APPROVAL_CONFIDENCE_THRESHOLD", "0.8"))
-    denial_threshold = float(os.getenv("DENIAL_CONFIDENCE_THRESHOLD", "0.2"))
-
-    ai_evaluator = AIEvaluator(
-        model=model,
-        approval_threshold=approval_threshold,
-        denial_threshold=denial_threshold,
-    )
-    logger.info(f"AI evaluator initialized with model: {model}")
-except Exception as e:
-    logger.warning(f"AI evaluator initialization failed: {e}")
-    logger.warning("Only Tier 1 (dangerous) and Tier 2 (safe) will be available")
-
-# Initialize Slack escalation service (optional — requires [slack] extra)
-slack_service = None
-if _slack_available and SlackApprovalService.is_available():
-    try:
-        slack_service = SlackApprovalService()
-        slack_service.start_background()
-        logger.info("Slack escalation service initialized and connected")
-    except Exception as e:
-        logger.warning(f"Slack service initialization failed: {e}")
-        logger.warning("Human escalation via Slack will not be available")
-else:
-    logger.info("Slack escalation not configured (set SLACK_BOT_TOKEN + SLACK_APP_TOKEN to enable)")
-
-# Initialize file queue for pending approvals
-_queue_enabled = os.getenv("PHLEGYAS_QUEUE_ENABLED", "true").lower() == "true"
-file_queue = FileQueueWriter() if _queue_enabled else None
-if file_queue:
-    logger.info(f"File queue enabled: {file_queue.queue_dir}")
-else:
-    logger.info("File queue disabled (PHLEGYAS_QUEUE_ENABLED=false)")
-
-# Initialize macOS notifier (opt-in, default on darwin)
-_notify_macos = os.getenv("PHLEGYAS_NOTIFY_MACOS", "true").lower() != "false"
-macos_notifier = MacOSNotifier() if _notify_macos and MacOSNotifier.is_available() else None
-if macos_notifier:
-    logger.info("macOS notifications enabled")
-
-# Audit log configuration
-enable_audit_log = os.getenv("ENABLE_AUDIT_LOG", "true").lower() == "true"
-audit_log_file = os.getenv("AUDIT_LOG_FILE", "audit.jsonl")
 
 
 def sanitize_for_audit(input_data: dict[str, Any]) -> dict[str, Any]:
@@ -237,7 +279,7 @@ def write_audit_log(
     confidence: float | None = None,
 ):
     """Write decision to audit log. Sensitive values are masked."""
-    if not enable_audit_log:
+    if not state.enable_audit_log:
         return
 
     log_entry = {
@@ -251,7 +293,7 @@ def write_audit_log(
     }
 
     try:
-        with open(audit_log_file, "a") as f:
+        with open(state.audit_log_file, "a") as f:
             f.write(json.dumps(log_entry) + "\n")
     except Exception as e:
         logger.error(f"Failed to write audit log: {e}")
@@ -276,23 +318,23 @@ def get_cached_decision(operation_hash: str) -> tuple[str, Any, datetime] | None
 
     Returns: (decision, evaluation_result, timestamp) or None if not cached/expired
     """
-    if not CACHE_ENABLED:
+    if not state.cache_enabled:
         return None
 
-    if operation_hash not in approval_cache:
-        cache_metrics["misses"] += 1
+    if operation_hash not in state.approval_cache:
+        state.cache_metrics["misses"] += 1
         return None
 
-    decision, evaluation, timestamp = approval_cache[operation_hash]
+    decision, evaluation, timestamp = state.approval_cache[operation_hash]
 
     # Check if cache entry is expired
-    if datetime.now(UTC) - timestamp > timedelta(seconds=CACHE_TTL_SECONDS):
-        del approval_cache[operation_hash]
-        cache_metrics["expired"] += 1
+    if datetime.now(UTC) - timestamp > timedelta(seconds=state.cache_ttl_seconds):
+        del state.approval_cache[operation_hash]
+        state.cache_metrics["expired"] += 1
         logger.debug(f"Cache entry expired for hash {operation_hash[:8]}...")
         return None
 
-    cache_metrics["hits"] += 1
+    state.cache_metrics["hits"] += 1
     logger.debug(f"Cache hit for hash {operation_hash[:8]}...")
     return decision, evaluation, timestamp
 
@@ -301,19 +343,19 @@ def cache_decision(operation_hash: str, decision: str, evaluation: Any):
     """
     Cache a Tier 3 decision for future use. Evicts oldest entry if at capacity.
     """
-    if not CACHE_ENABLED:
+    if not state.cache_enabled:
         return
 
     # Evict oldest entry if at capacity
-    if len(approval_cache) >= CACHE_MAX_SIZE:
-        oldest_key = min(approval_cache, key=lambda k: approval_cache[k][2])
-        del approval_cache[oldest_key]
-        cache_metrics["evictions"] += 1
-        logger.debug(f"Cache evicted oldest entry (size was {CACHE_MAX_SIZE})")
+    if len(state.approval_cache) >= state.cache_max_size:
+        oldest_key = min(state.approval_cache, key=lambda k: state.approval_cache[k][2])
+        del state.approval_cache[oldest_key]
+        state.cache_metrics["evictions"] += 1
+        logger.debug(f"Cache evicted oldest entry (size was {state.cache_max_size})")
 
-    approval_cache[operation_hash] = (decision, evaluation, datetime.now(UTC))
+    state.approval_cache[operation_hash] = (decision, evaluation, datetime.now(UTC))
     logger.debug(
-        f"Cached decision for hash {operation_hash[:8]}... (cache size: {len(approval_cache)})"
+        f"Cached decision for hash {operation_hash[:8]}... (cache size: {len(state.approval_cache)})"
     )
 
 
@@ -494,132 +536,96 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent]:
         raise ValueError(f"Unknown tool: {name}")
 
 
-async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextContent]:
-    """Handle permissions__approve tool call."""
-    tool_name = arguments["tool_name"]
-    input_data = arguments["input"]
-    _tool_use_id = arguments.get("tool_use_id")
+@dataclass
+class TierResult:
+    """Structured result from the tier evaluation pipeline."""
 
-    logger.info(f"Permission request: {tool_name}")
-    logger.debug(f"Input keys: {list(input_data.keys())}")
+    tier: str  # e.g. "tier1_dangerous", "tier2_safe", "tier3_ai_approve"
+    decision: str  # "allow", "deny", "ask_user", "no_ai"
+    reason: str
+    confidence: float | None = None
+    evaluation: Any = None  # Full EvaluationResult from Tier 3 AI
 
+
+async def _evaluate_tiers(tool_name: str, input_data: dict[str, Any]) -> TierResult:
+    """
+    Run the shared tier-evaluation pipeline (Tiers 1 → 2 → 2.5 → 3).
+
+    Returns a TierResult with the decision from whichever tier resolved first.
+    Audit logging and logger calls for Tiers 1-2.5 are handled here (identical
+    across all callers).  Tier 3 audit logging is left to the caller since
+    response formatting differs per handler.
+    """
     # Tier 1: Check for dangerous patterns
-    is_dangerous, dangerous_reason = dangerous_detector.is_dangerous(tool_name, input_data)
+    is_dangerous, dangerous_reason = state.dangerous_detector.is_dangerous(tool_name, input_data)
     if is_dangerous:
         logger.warning(f"DENIED (Tier 1): {dangerous_reason}")
         write_audit_log(tool_name, input_data, "deny", "tier1_dangerous", dangerous_reason)
-        result = {"behavior": "deny", "message": dangerous_reason, "updatedInput": {}}
-        return [TextContent(type="text", text=json.dumps(result))]
+        return TierResult(tier="tier1_dangerous", decision="deny", reason=dangerous_reason)
 
     # Tier 2: Check for safe categories
-    is_safe, safe_category = safe_detector.is_safe(tool_name, input_data)
+    is_safe, safe_category = state.safe_detector.is_safe(tool_name, input_data)
     if is_safe:
-        message = f"Auto-approved (Tier 2): {safe_category}"
         logger.info(f"APPROVED (Tier 2): {safe_category}")
         write_audit_log(tool_name, input_data, "allow", "tier2_safe", safe_category)
-        result = {"behavior": "allow", "message": message, "updatedInput": {}}
-        return [TextContent(type="text", text=json.dumps(result))]
+        return TierResult(tier="tier2_safe", decision="allow", reason=safe_category)
 
     # Tier 2.5: Check script trust store (TOFU - Trust On First Use)
-    is_trusted, trust_category = trust_store.is_trusted(tool_name, input_data)
+    is_trusted, trust_category = state.trust_store.is_trusted(tool_name, input_data)
     if is_trusted:
-        message = f"Auto-approved (Tier 2.5): {trust_category}"
         logger.info(f"APPROVED (Tier 2.5): {trust_category}")
         write_audit_log(tool_name, input_data, "allow", "tier2_5_trusted_script", trust_category)
-        result = {"behavior": "allow", "message": message, "updatedInput": {}}
-        return [TextContent(type="text", text=json.dumps(result))]
+        return TierResult(tier="tier2_5_trusted_script", decision="allow", reason=trust_category)
     elif trust_category:
         logger.warning(
             f"Tier 2.5 trust-store degradation - falling through to Tier 3: {trust_category}"
         )
 
     # Tier 3: AI evaluation
-    if ai_evaluator is None:
-        message = "Denied: AI evaluator unavailable, requires manual approval"
-        logger.warning(f"DENIED (Tier 3): {message}")
-        write_audit_log(tool_name, input_data, "deny", "tier3_no_ai", message)
-        result = {"behavior": "deny", "message": message, "updatedInput": {}}
-        return [TextContent(type="text", text=json.dumps(result))]
+    if state.ai_evaluator is None:
+        return TierResult(
+            tier="tier3_no_ai",
+            decision="no_ai",
+            reason="AI evaluator unavailable, requires manual approval",
+        )
+
+    decision, evaluation = await state.ai_evaluator.evaluate(tool_name, input_data)
+
+    if decision == "approve":
+        return TierResult(
+            tier="tier3_ai_approve",
+            decision="allow",
+            reason=evaluation.reasoning,
+            confidence=evaluation.confidence,
+            evaluation=evaluation,
+        )
+    elif decision == "deny":
+        return TierResult(
+            tier="tier3_ai_deny",
+            decision="deny",
+            reason=evaluation.reasoning,
+            confidence=evaluation.confidence,
+            evaluation=evaluation,
+        )
+    else:  # ask_user
+        return TierResult(
+            tier="tier3_needs_human",
+            decision="ask_user",
+            reason=evaluation.reasoning,
+            confidence=evaluation.confidence,
+            evaluation=evaluation,
+        )
+
+
+async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextContent]:
+    """Handle permissions__approve tool call."""
+    tool_name = arguments["tool_name"]
+    input_data = arguments["input"]
+    logger.info(f"Permission request: {tool_name}")
+    logger.debug(f"Input keys: {list(input_data.keys())}")
 
     try:
-        decision, evaluation = await ai_evaluator.evaluate(tool_name, input_data)
-
-        if decision == "approve":
-            message = (
-                f"AI-approved (confidence: {evaluation.confidence:.2f}): {evaluation.reasoning}"
-            )
-            logger.info(f"APPROVED (Tier 3): {message}")
-            write_audit_log(
-                tool_name,
-                input_data,
-                "allow",
-                "tier3_ai_approve",
-                evaluation.reasoning,
-                evaluation.confidence,
-            )
-            result = {"behavior": "allow", "message": message, "updatedInput": {}}
-            return [TextContent(type="text", text=json.dumps(result))]
-
-        elif decision == "deny":
-            message = f"AI-denied (confidence: {evaluation.confidence:.2f}): {evaluation.reasoning}"
-            logger.warning(f"DENIED (Tier 3): {message}")
-            write_audit_log(
-                tool_name,
-                input_data,
-                "deny",
-                "tier3_ai_deny",
-                evaluation.reasoning,
-                evaluation.confidence,
-            )
-            result = {"behavior": "deny", "message": message, "updatedInput": {}}
-            return [TextContent(type="text", text=json.dumps(result))]
-
-        else:  # ask_user
-            # Escalate to Slack if configured
-            if slack_service is not None:
-                logger.info(f"Escalating to Slack: {evaluation.reasoning}")
-                slack_decision = await slack_service.request_approval(
-                    tool_name=tool_name,
-                    input_data=input_data,
-                    reasoning=evaluation.reasoning,
-                    category=evaluation.category,
-                )
-                behavior = "allow" if slack_decision == "allow" else "deny"
-                tier_label = (
-                    "tier3_slack_approved" if slack_decision == "allow" else "tier3_slack_denied"
-                )
-                message = f"Slack human decision: {slack_decision} — {evaluation.reasoning}"
-                write_audit_log(
-                    tool_name,
-                    input_data,
-                    behavior,
-                    tier_label,
-                    message,
-                    evaluation.confidence,
-                )
-                result = {"behavior": behavior, "message": message, "updatedInput": {}}
-                return [TextContent(type="text", text=json.dumps(result))]
-
-            # No Slack configured: deny as before
-            message = (
-                f"Denied: Requires human approval. "
-                f"{evaluation.reasoning} (confidence: {evaluation.confidence:.2f})"
-            )
-            if evaluation.suggested_message:
-                message = evaluation.suggested_message
-
-            logger.warning(f"DENIED (Tier 3 - needs human): {message}")
-            write_audit_log(
-                tool_name,
-                input_data,
-                "deny",
-                "tier3_needs_human",
-                evaluation.reasoning,
-                evaluation.confidence,
-            )
-            result = {"behavior": "deny", "message": message, "updatedInput": {}}
-            return [TextContent(type="text", text=json.dumps(result))]
-
+        tier_result = await _evaluate_tiers(tool_name, input_data)
     except Exception as e:
         message = f"Denied: AI evaluation error: {str(e)}"
         logger.error(f"DENIED (Tier 3 error): {message}")
@@ -627,20 +633,160 @@ async def handle_permissions_approve(arguments: dict[str, Any]) -> list[TextCont
         result = {"behavior": "deny", "message": message, "updatedInput": {}}
         return [TextContent(type="text", text=json.dumps(result))]
 
+    # Tier 1: dangerous — deny with raw reason
+    if tier_result.tier == "tier1_dangerous":
+        result = {"behavior": "deny", "message": tier_result.reason, "updatedInput": {}}
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 2 / 2.5: safe — allow with human-readable label
+    if tier_result.tier in ("tier2_safe", "tier2_5_trusted_script"):
+        tier_label = "Tier 2" if tier_result.tier == "tier2_safe" else "Tier 2.5"
+        message = f"Auto-approved ({tier_label}): {tier_result.reason}"
+        result = {"behavior": "allow", "message": message, "updatedInput": {}}
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 3: no AI evaluator — deny
+    if tier_result.decision == "no_ai":
+        message = "Denied: AI evaluator unavailable, requires manual approval"
+        logger.warning(f"DENIED (Tier 3): {message}")
+        write_audit_log(tool_name, input_data, "deny", "tier3_no_ai", message)
+        result = {"behavior": "deny", "message": message, "updatedInput": {}}
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 3: AI approved
+    if tier_result.decision == "allow":
+        message = f"AI-approved (confidence: {tier_result.confidence:.2f}): {tier_result.reason}"
+        logger.info(f"APPROVED (Tier 3): {message}")
+        write_audit_log(
+            tool_name,
+            input_data,
+            "allow",
+            "tier3_ai_approve",
+            tier_result.reason,
+            tier_result.confidence,
+        )
+        result = {"behavior": "allow", "message": message, "updatedInput": {}}
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 3: AI denied
+    if tier_result.decision == "deny":
+        message = f"AI-denied (confidence: {tier_result.confidence:.2f}): {tier_result.reason}"
+        logger.warning(f"DENIED (Tier 3): {message}")
+        write_audit_log(
+            tool_name,
+            input_data,
+            "deny",
+            "tier3_ai_deny",
+            tier_result.reason,
+            tier_result.confidence,
+        )
+        result = {"behavior": "deny", "message": message, "updatedInput": {}}
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 3: ask_user — escalate to Slack if configured, else deny
+    evaluation = tier_result.evaluation
+    if state.slack_service is not None:
+        logger.info(f"Escalating to Slack: {tier_result.reason}")
+        slack_decision = await state.slack_service.request_approval(
+            tool_name=tool_name,
+            input_data=input_data,
+            reasoning=tier_result.reason,
+            category=evaluation.category,
+        )
+        behavior = "allow" if slack_decision == "allow" else "deny"
+        tier_label = "tier3_slack_approved" if slack_decision == "allow" else "tier3_slack_denied"
+        message = f"Slack human decision: {slack_decision} — {tier_result.reason}"
+        write_audit_log(
+            tool_name,
+            input_data,
+            behavior,
+            tier_label,
+            message,
+            tier_result.confidence,
+        )
+        result = {"behavior": behavior, "message": message, "updatedInput": {}}
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # No Slack configured: deny
+    message = (
+        f"Denied: Requires human approval. "
+        f"{tier_result.reason} (confidence: {tier_result.confidence:.2f})"
+    )
+    if evaluation.suggested_message:
+        message = evaluation.suggested_message
+
+    logger.warning(f"DENIED (Tier 3 - needs human): {message}")
+    write_audit_log(
+        tool_name,
+        input_data,
+        "deny",
+        "tier3_needs_human",
+        tier_result.reason,
+        tier_result.confidence,
+    )
+    result = {"behavior": "deny", "message": message, "updatedInput": {}}
+    return [TextContent(type="text", text=json.dumps(result))]
+
 
 def _notify_pending(
-    pending: "PendingApproval",
+    pending: PendingApproval,
     tool_name: str,
     input_data: dict[str, Any],
     reason: str,
     request_id: str,
 ) -> None:
     """Write to file queue and fire macOS notification for a new pending approval."""
-    if file_queue:
+    if state.file_queue:
         summary = FileQueueWriter.summarize_input(tool_name, input_data)
-        file_queue.write_pending(pending, summary)
-    if macos_notifier:
-        macos_notifier.notify(tool_name, reason[:80], request_id)
+        state.file_queue.write_pending(pending, summary)
+    if state.macos_notifier:
+        state.macos_notifier.notify(tool_name, reason[:80], request_id)
+
+
+def _validate_create_pending(
+    tool_name: str,
+    input_data: dict[str, Any],
+    workflow_id: str | None,
+    agent_id: str | None,
+    *,
+    reason: str,
+    tier: str,
+    confidence: float | None,
+    log_level: str = "warning",
+    request_id: str | None = None,
+) -> list[TextContent]:
+    """Create a pending approval, notify, audit-log, and return the response."""
+    if request_id is None:
+        request_id = str(uuid.uuid4())
+
+    getattr(logger, log_level)(f"PENDING (Tier 3): {reason}")
+
+    pending = PendingApproval(
+        request_id=request_id,
+        tool_name=tool_name,
+        input_data=input_data,
+        reason=reason,
+        confidence=confidence,
+        tier=tier,
+        workflow_id=workflow_id,
+        agent_id=agent_id,
+        pending_ttl_seconds=state.pending_ttl_seconds,
+    )
+    state.pending_approvals[request_id] = pending
+
+    _notify_pending(pending, tool_name, input_data, reason, request_id)
+
+    write_audit_log(tool_name, input_data, "pending", tier, reason, confidence)
+    result = {
+        "status": "pending",
+        "tier": tier,
+        "reason": reason,
+        "confidence": confidence,
+        "request_id": request_id,
+        "expires_at": pending.expires_at.isoformat(),
+        "ttl_seconds": state.pending_ttl_seconds,
+    }
+    return [TextContent(type="text", text=json.dumps(result))]
 
 
 async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextContent]:
@@ -666,229 +812,148 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
     logger.info(f"Validation request: {tool_name}")
     logger.debug(f"Input keys: {list(input_data.keys())}")
 
-    # Tier 1: Check for dangerous patterns
-    is_dangerous, dangerous_reason = dangerous_detector.is_dangerous(tool_name, input_data)
-    if is_dangerous:
-        logger.warning(f"DENIED (Tier 1): {dangerous_reason}")
-        write_audit_log(tool_name, input_data, "deny", "tier1_dangerous", dangerous_reason)
-        result = {
-            "status": "denied",
-            "tier": "tier1_dangerous",
-            "reason": dangerous_reason,
-            "confidence": None,
-            "request_id": None,
-        }
-        return [TextContent(type="text", text=json.dumps(result))]
-
-    # Tier 2: Check for safe categories
-    is_safe, safe_category = safe_detector.is_safe(tool_name, input_data)
-    if is_safe:
-        logger.info(f"APPROVED (Tier 2): {safe_category}")
-        write_audit_log(tool_name, input_data, "allow", "tier2_safe", safe_category)
-        result = {
-            "status": "approved",
-            "tier": "tier2_safe",
-            "reason": safe_category,
-            "confidence": None,
-            "request_id": None,
-        }
-        return [TextContent(type="text", text=json.dumps(result))]
-
-    # Tier 2.5: Check script trust store (TOFU - Trust On First Use)
-    is_trusted, trust_category = trust_store.is_trusted(tool_name, input_data)
-    if is_trusted:
-        logger.info(f"APPROVED (Tier 2.5): {trust_category}")
-        write_audit_log(tool_name, input_data, "allow", "tier2_5_trusted_script", trust_category)
-        result = {
-            "status": "approved",
-            "tier": "tier2_5_trusted_script",
-            "reason": trust_category,
-            "confidence": None,
-            "request_id": None,
-        }
-        return [TextContent(type="text", text=json.dumps(result))]
-    elif trust_category:
-        logger.warning(
-            f"Tier 2.5 trust-store degradation - falling through to Tier 3: {trust_category}"
-        )
-
-    # Tier 3: AI evaluation (with caching)
+    # Check Tier 3 cache before running full pipeline
     operation_hash = compute_operation_hash(tool_name, input_data)
-
-    # Check cache first
     cached = get_cached_decision(operation_hash)
+
     if cached is not None:
+        # Cache hit — use cached Tier 3 decision (skip Tiers 1-2.5 re-evaluation)
         decision, evaluation, cached_time = cached
         logger.info(f"Using cached decision from {cached_time.isoformat()} (Tier 3 cache hit)")
-        # Note: We still write to audit log for cache hits to track all validation requests
+        tier_result = TierResult(
+            tier="tier3_ai_approve" if decision == "approve" else "tier3_ai_deny",
+            decision="allow" if decision == "approve" else "deny",
+            reason=evaluation.reasoning,
+            confidence=evaluation.confidence,
+            evaluation=evaluation,
+        )
     else:
-        # Cache miss - need to evaluate
-        if ai_evaluator is None:
-            message = "AI evaluator unavailable, requires manual approval"
-            logger.warning(f"PENDING (Tier 3): {message}")
-            request_id = str(uuid.uuid4())
-
-            # Create and store pending approval
-            pending = PendingApproval(
-                request_id=request_id,
-                tool_name=tool_name,
-                input_data=input_data,
-                reason=message,
+        # Cache miss — run full pipeline
+        try:
+            tier_result = await _evaluate_tiers(tool_name, input_data)
+        except Exception as e:
+            return _validate_create_pending(
+                tool_name,
+                input_data,
+                workflow_id,
+                agent_id,
+                reason=f"AI evaluation error: {str(e)}",
+                tier="tier3_error",
                 confidence=None,
-                tier="tier3_no_ai",
-                workflow_id=workflow_id,
-                agent_id=agent_id,
+                log_level="error",
             )
-            pending_approvals[request_id] = pending
 
-            # Notify via file queue and macOS
-            _notify_pending(pending, tool_name, input_data, message, request_id)
+        # Cache Tier 3 AI decisions for future use
+        if tier_result.tier in ("tier3_ai_approve", "tier3_ai_deny") and tier_result.evaluation:
+            raw_decision = "approve" if tier_result.decision == "allow" else "deny"
+            cache_decision(operation_hash, raw_decision, tier_result.evaluation)
 
-            write_audit_log(tool_name, input_data, "pending", "tier3_no_ai", message)
-            result = {
-                "status": "pending",
-                "tier": "tier3_no_ai",
-                "reason": message,
-                "confidence": None,
-                "request_id": request_id,
-                "expires_at": pending.expires_at.isoformat(),
-                "ttl_seconds": PENDING_TTL_SECONDS,
-            }
-            return [TextContent(type="text", text=json.dumps(result))]
-
-        decision, evaluation = await ai_evaluator.evaluate(tool_name, input_data)
-        # Cache the decision for future use
-        cache_decision(operation_hash, decision, evaluation)
-
-    # Process the decision (whether from cache or fresh evaluation)
-    try:
-        if decision == "approve":
-            logger.info(f"APPROVED (Tier 3): {evaluation.reasoning}")
-            write_audit_log(
-                tool_name,
-                input_data,
-                "allow",
-                "tier3_ai_approve",
-                evaluation.reasoning,
-                evaluation.confidence,
-            )
-            result = {
-                "status": "approved",
-                "tier": "tier3_ai_approve",
-                "reason": evaluation.reasoning,
-                "confidence": evaluation.confidence,
-                "request_id": None,
-            }
-            return [TextContent(type="text", text=json.dumps(result))]
-
-        elif decision == "deny":
-            logger.warning(f"DENIED (Tier 3): {evaluation.reasoning}")
-            write_audit_log(
-                tool_name,
-                input_data,
-                "deny",
-                "tier3_ai_deny",
-                evaluation.reasoning,
-                evaluation.confidence,
-            )
-            result = {
-                "status": "denied",
-                "tier": "tier3_ai_deny",
-                "reason": evaluation.reasoning,
-                "confidence": evaluation.confidence,
-                "request_id": None,
-            }
-            return [TextContent(type="text", text=json.dumps(result))]
-
-        else:  # ask_user - requires human approval
-            logger.warning(f"PENDING (Tier 3): {evaluation.reasoning}")
-            request_id = str(uuid.uuid4())
-
-            # Create and store pending approval
-            pending = PendingApproval(
-                request_id=request_id,
-                tool_name=tool_name,
-                input_data=input_data,
-                reason=evaluation.reasoning,
-                confidence=evaluation.confidence,
-                tier="tier3_needs_human",
-                workflow_id=workflow_id,
-                agent_id=agent_id,
-            )
-            pending_approvals[request_id] = pending
-
-            # Notify Slack if configured (fire-and-forget)
-            if slack_service is not None:
-                asyncio.create_task(
-                    slack_service.notify_pending(
-                        tool_name=tool_name,
-                        input_data=input_data,
-                        reasoning=evaluation.reasoning,
-                        category=evaluation.category,
-                        request_id=request_id,
-                    )
-                )
-
-            # Notify via file queue and macOS
-            _notify_pending(pending, tool_name, input_data, evaluation.reasoning, request_id)
-
-            write_audit_log(
-                tool_name,
-                input_data,
-                "pending",
-                "tier3_needs_human",
-                evaluation.reasoning,
-                evaluation.confidence,
-            )
-            result = {
-                "status": "pending",
-                "tier": "tier3_needs_human",
-                "reason": evaluation.reasoning,
-                "confidence": evaluation.confidence,
-                "request_id": request_id,
-                "expires_at": pending.expires_at.isoformat(),
-                "ttl_seconds": PENDING_TTL_SECONDS,
-            }
-            return [TextContent(type="text", text=json.dumps(result))]
-
-    except Exception as e:
-        logger.error(f"PENDING (Tier 3 error): {str(e)}")
-        request_id = str(uuid.uuid4())
-
-        # Create and store pending approval for error case
-        pending = PendingApproval(
-            request_id=request_id,
-            tool_name=tool_name,
-            input_data=input_data,
-            reason=f"AI evaluation error: {str(e)}",
-            confidence=None,
-            tier="tier3_error",
-            workflow_id=workflow_id,
-            agent_id=agent_id,
-        )
-        pending_approvals[request_id] = pending
-
-        # Notify via file queue and macOS
-        _notify_pending(
-            pending, tool_name, input_data, f"AI evaluation error: {str(e)}", request_id
-        )
-
-        write_audit_log(tool_name, input_data, "pending", "tier3_error", str(e))
+    # Tiers 1-2.5: audit logging already done by _evaluate_tiers; format response
+    if tier_result.tier in ("tier1_dangerous",):
         result = {
-            "status": "pending",
-            "tier": "tier3_error",
-            "reason": f"AI evaluation error: {str(e)}",
+            "status": "denied",
+            "tier": tier_result.tier,
+            "reason": tier_result.reason,
             "confidence": None,
-            "request_id": request_id,
-            "expires_at": pending.expires_at.isoformat(),
-            "ttl_seconds": PENDING_TTL_SECONDS,
+            "request_id": None,
         }
         return [TextContent(type="text", text=json.dumps(result))]
+
+    if tier_result.tier in ("tier2_safe", "tier2_5_trusted_script"):
+        result = {
+            "status": "approved",
+            "tier": tier_result.tier,
+            "reason": tier_result.reason,
+            "confidence": None,
+            "request_id": None,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 3: no AI evaluator — park as pending
+    if tier_result.decision == "no_ai":
+        return _validate_create_pending(
+            tool_name,
+            input_data,
+            workflow_id,
+            agent_id,
+            reason=tier_result.reason,
+            tier="tier3_no_ai",
+            confidence=None,
+            log_level="warning",
+        )
+
+    # Tier 3: AI approved
+    if tier_result.decision == "allow":
+        logger.info(f"APPROVED (Tier 3): {tier_result.reason}")
+        write_audit_log(
+            tool_name,
+            input_data,
+            "allow",
+            "tier3_ai_approve",
+            tier_result.reason,
+            tier_result.confidence,
+        )
+        result = {
+            "status": "approved",
+            "tier": "tier3_ai_approve",
+            "reason": tier_result.reason,
+            "confidence": tier_result.confidence,
+            "request_id": None,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 3: AI denied
+    if tier_result.decision == "deny":
+        logger.warning(f"DENIED (Tier 3): {tier_result.reason}")
+        write_audit_log(
+            tool_name,
+            input_data,
+            "deny",
+            "tier3_ai_deny",
+            tier_result.reason,
+            tier_result.confidence,
+        )
+        result = {
+            "status": "denied",
+            "tier": "tier3_ai_deny",
+            "reason": tier_result.reason,
+            "confidence": tier_result.confidence,
+            "request_id": None,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
+    # Tier 3: ask_user — park as pending
+    evaluation = tier_result.evaluation
+
+    # Notify Slack if configured (fire-and-forget)
+    request_id = str(uuid.uuid4())
+    if state.slack_service is not None:
+        asyncio.create_task(
+            state.slack_service.notify_pending(
+                tool_name=tool_name,
+                input_data=input_data,
+                reasoning=tier_result.reason,
+                category=evaluation.category,
+                request_id=request_id,
+            )
+        )
+
+    return _validate_create_pending(
+        tool_name,
+        input_data,
+        workflow_id,
+        agent_id,
+        reason=tier_result.reason,
+        tier="tier3_needs_human",
+        confidence=tier_result.confidence,
+        log_level="warning",
+        request_id=request_id,
+    )
 
 
 async def handle_get_approval_stats(arguments: dict[str, Any]) -> list[TextContent]:
     """Handle get_approval_stats tool call."""
-    if not enable_audit_log or not os.path.exists(audit_log_file):
+    if not state.enable_audit_log or not os.path.exists(state.audit_log_file):
         return [TextContent(type="text", text=json.dumps({"error": "Audit log not available"}))]
 
     try:
@@ -899,20 +964,20 @@ async def handle_get_approval_stats(arguments: dict[str, Any]) -> list[TextConte
             "by_tier": {},
             "by_tool": {},
             "cache": {
-                "hits": cache_metrics["hits"],
-                "misses": cache_metrics["misses"],
-                "expired": cache_metrics["expired"],
-                "evictions": cache_metrics["evictions"],
-                "size": len(approval_cache),
-                "max_size": CACHE_MAX_SIZE,
+                "hits": state.cache_metrics["hits"],
+                "misses": state.cache_metrics["misses"],
+                "expired": state.cache_metrics["expired"],
+                "evictions": state.cache_metrics["evictions"],
+                "size": len(state.approval_cache),
+                "max_size": state.cache_max_size,
             },
             "pending": {
-                "count": len(pending_approvals),
-                "max_size": PENDING_MAX_SIZE,
+                "count": len(state.pending_approvals),
+                "max_size": state.pending_max_size,
             },
         }
 
-        with open(audit_log_file) as f:
+        with open(state.audit_log_file) as f:
             for line in f:
                 try:
                     entry = json.loads(line)
@@ -957,7 +1022,7 @@ async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]
     cleanup_expired_pending()
 
     # Check if pending approval exists
-    if request_id not in pending_approvals:
+    if request_id not in state.pending_approvals:
         result = {
             "success": False,
             "error": "not_found",
@@ -965,11 +1030,11 @@ async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]
         }
         return [TextContent(type="text", text=json.dumps(result))]
 
-    pending = pending_approvals[request_id]
+    pending = state.pending_approvals[request_id]
 
     # Check if expired
     if pending.is_expired():
-        pending_approvals.pop(request_id, None)
+        state.pending_approvals.pop(request_id, None)
         result = {
             "success": False,
             "error": "expired",
@@ -1004,12 +1069,12 @@ async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]
     pending.resolved_at = datetime.now(UTC)
     pending.resolved_by = f"human:{approver_id}"
     pending.resolution = decision  # "approve" or "deny"
-    pending_approvals.pop(request_id)
-    resolved_approvals[request_id] = pending
+    state.pending_approvals.pop(request_id)
+    state.resolved_approvals[request_id] = pending
 
     # Update file queue
-    if file_queue:
-        file_queue.resolve(request_id, decision, f"human:{approver_id}")
+    if state.file_queue:
+        state.file_queue.resolve(request_id, decision, f"human:{approver_id}")
 
     result = {
         "success": True,
@@ -1038,8 +1103,8 @@ async def handle_poll_approval(arguments: dict[str, Any]) -> list[TextContent]:
     cleanup_expired_pending()
 
     # Check pending_approvals
-    if request_id in pending_approvals:
-        pending = pending_approvals[request_id]
+    if request_id in state.pending_approvals:
+        pending = state.pending_approvals[request_id]
         result = {
             "found": True,
             "status": "pending",
@@ -1057,8 +1122,8 @@ async def handle_poll_approval(arguments: dict[str, Any]) -> list[TextContent]:
         return [TextContent(type="text", text=json.dumps(result))]
 
     # Check resolved_approvals
-    if request_id in resolved_approvals:
-        resolved = resolved_approvals[request_id]
+    if request_id in state.resolved_approvals:
+        resolved = state.resolved_approvals[request_id]
         # Map resolution to status explicitly
         _resolution_status = {"approve": "approved", "deny": "denied", "expired": "expired"}
         status = _resolution_status.get(resolved.resolution, resolved.resolution or "denied")
@@ -1073,7 +1138,7 @@ async def handle_poll_approval(arguments: dict[str, Any]) -> list[TextContent]:
             "ttl_remaining_seconds": max(
                 0,
                 int(
-                    RESOLVED_TTL_SECONDS
+                    state.resolved_ttl_seconds
                     - (datetime.now(UTC) - resolved.resolved_at).total_seconds()
                 ),
             )
@@ -1110,7 +1175,7 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
     cleanup_expired_pending()
 
     # Look up request_id in pending_approvals (NOT resolved_approvals)
-    if request_id not in pending_approvals:
+    if request_id not in state.pending_approvals:
         result = {
             "success": False,
             "error": "not_found",
@@ -1119,11 +1184,11 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
         }
         return [TextContent(type="text", text=json.dumps(result))]
 
-    pending = pending_approvals[request_id]
+    pending = state.pending_approvals[request_id]
 
     # Check if expired (belt-and-suspenders, matches handle_submit_approval)
     if pending.is_expired():
-        pending_approvals.pop(request_id, None)
+        state.pending_approvals.pop(request_id, None)
         result = {
             "success": False,
             "error": "expired",
@@ -1133,7 +1198,7 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
         return [TextContent(type="text", text=json.dumps(result))]
 
     # Run delegation policy validation
-    violation = supervisor_policy.validate(pending, supervisor_id, workflow_id, decision)
+    violation = state.supervisor_policy.validate(pending, supervisor_id, workflow_id, decision)
     if violation is not None:
         result = {
             "success": False,
@@ -1181,12 +1246,12 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
     pending.status = "approved" if decision == "approve" else "denied"
 
     # Move from pending to resolved
-    pending_approvals.pop(request_id)
-    resolved_approvals[request_id] = pending
+    state.pending_approvals.pop(request_id)
+    state.resolved_approvals[request_id] = pending
 
     # Update file queue
-    if file_queue:
-        file_queue.resolve(request_id, decision, f"supervisor:{supervisor_id}")
+    if state.file_queue:
+        state.file_queue.resolve(request_id, decision, f"supervisor:{supervisor_id}")
 
     # Write audit log
     write_audit_log(
@@ -1227,7 +1292,7 @@ async def handle_get_pending_approvals(arguments: dict[str, Any]) -> list[TextCo
     agent_id_filter = arguments.get("agent_id")
 
     pending_list = []
-    for _request_id, pending in pending_approvals.items():
+    for _request_id, pending in state.pending_approvals.items():
         # Apply filters
         if workflow_id_filter and pending.workflow_id != workflow_id_filter:
             continue
@@ -1238,7 +1303,7 @@ async def handle_get_pending_approvals(arguments: dict[str, Any]) -> list[TextCo
 
     result = {
         "count": len(pending_list),
-        "pending_ttl_seconds": PENDING_TTL_SECONDS,
+        "pending_ttl_seconds": state.pending_ttl_seconds,
         "pending": pending_list,
     }
     return [TextContent(type="text", text=json.dumps(result))]
@@ -1247,12 +1312,12 @@ async def handle_get_pending_approvals(arguments: dict[str, Any]) -> list[TextCo
 async def main():
     """Run the MCP server."""
     logger.info("Starting Phlegyas MCP server...")
-    logger.info(f"Audit logging: {'enabled' if enable_audit_log else 'disabled'}")
-    if ai_evaluator:
-        logger.info(f"AI evaluation: enabled (model: {ai_evaluator.model})")
+    logger.info(f"Audit logging: {'enabled' if state.enable_audit_log else 'disabled'}")
+    if state.ai_evaluator:
+        logger.info(f"AI evaluation: enabled (model: {state.ai_evaluator.model})")
     else:
         logger.info("AI evaluation: disabled")
-    if slack_service:
+    if state.slack_service:
         logger.info("Slack escalation: enabled")
     else:
         logger.info("Slack escalation: disabled")
@@ -1261,8 +1326,8 @@ async def main():
         async with stdio_server() as (read_stream, write_stream):
             await app.run(read_stream, write_stream, app.create_initialization_options())
     finally:
-        if slack_service:
-            slack_service.close()
+        if state.slack_service:
+            state.slack_service.close()
 
 
 def run():
