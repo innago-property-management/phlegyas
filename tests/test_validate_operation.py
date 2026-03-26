@@ -435,3 +435,39 @@ class TestValidateOperationIntegration:
         assert "denied" in results
         # Agent should complete all validations (not crash)
         assert len(results) == len(operations)
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_writes_exactly_one_audit_entry(self, tmp_path):
+        """Regression: cache hits must write exactly one audit log entry, not two."""
+        import importlib
+        import os
+
+        audit_file = tmp_path / "cache_audit.jsonl"
+        os.environ["AUDIT_LOG_FILE"] = str(audit_file)
+        os.environ["ENABLE_AUDIT_LOG"] = "true"
+
+        try:
+            import phlegyas.approver_mcp
+
+            importlib.reload(phlegyas.approver_mcp)
+            from phlegyas.approver_mcp import handle_validate_operation as validate
+
+            # First call: safe operation (Tier 2 hit, writes audit)
+            await validate({"tool_name": "Bash", "input": {"command": "git status"}})
+            first_count = len(audit_file.read_text().strip().split("\n"))
+
+            # Second identical call: should also write exactly one entry
+            await validate({"tool_name": "Bash", "input": {"command": "git status"}})
+            total_count = len(audit_file.read_text().strip().split("\n"))
+
+            # Each call should produce exactly one audit entry
+            assert total_count == first_count + 1, (
+                f"Expected {first_count + 1} entries but got {total_count} "
+                "(cache hit likely wrote duplicate audit log entries)"
+            )
+        finally:
+            if "AUDIT_LOG_FILE" in os.environ:
+                del os.environ["AUDIT_LOG_FILE"]
+            import phlegyas.approver_mcp
+
+            importlib.reload(phlegyas.approver_mcp)

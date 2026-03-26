@@ -840,6 +840,15 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
             tier_result.reason,
             tier_result.confidence,
         )
+        result = {
+            "status": "approved" if tier_result.decision == "allow" else "denied",
+            "tier": tier_result.tier,
+            "reason": tier_result.reason,
+            "confidence": tier_result.confidence,
+            "request_id": None,
+        }
+        return [TextContent(type="text", text=json.dumps(result))]
+
     else:
         # Cache miss — run full pipeline
         try:
