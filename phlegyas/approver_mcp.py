@@ -971,8 +971,9 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
             )
         )
         task.add_done_callback(
-            lambda t: t.exception()
-            and logger.warning("Slack notification failed: %s", t.exception())
+            lambda t: (
+                t.exception() and logger.warning("Slack notification failed: %s", t.exception())
+            )
         )
 
     return _validate_create_pending(
