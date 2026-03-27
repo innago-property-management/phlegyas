@@ -9,10 +9,4 @@ permissions:
 
 jobs:
   cancel-stale:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Cancel in-progress runs for this PR
-        uses: styfle/cancel-workflow-action@85880fa0301c86cca9da44039ee3bb12d3bedbfa # 0.12.1
-        with:
-          access_token: ${{ github.token }}
-          workflow_id: ci.yml
+    uses: innago-property-management/Oui-DELIVER/.github/workflows/cancel-stale-pr-runs.yml@main

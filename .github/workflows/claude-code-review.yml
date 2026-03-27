@@ -1,0 +1,28 @@
+name: PR Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, ready_for_review, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+  id-token: write
+
+jobs:
+  review:
+    uses: innago-property-management/Oui-DELIVER/.github/workflows/claude-code-review.yml@main
+    with:
+      allow_approve: true
+      additional_context: |
+        phlegyas is an MCP server that provides AI-powered permission approval for
+        Claude Code using a three-tier intelligent evaluation system. It enables
+        autonomous multi-agent workflows by automatically approving safe operations
+        while blocking dangerous ones.
+        Core Architecture: Three-tier evaluation pipeline
+        - Tier 1 (Dangerous): Instant denial using regex pattern matching for destructive operations
+        - Tier 2 (Safe): Instant approval for known-safe operations (read-only tools, tests, builds)
+        - Tier 3 (AI): Claude AI evaluation for ambiguous cases with confidence thresholds
+    secrets:
+      anthropicKey: ${{ secrets.ANTHROPIC_API_KEY }}
