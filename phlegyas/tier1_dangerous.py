@@ -51,9 +51,12 @@ class DangerousPatternDetector:
             r"terraform\s+apply\s+.*-destroy", re.IGNORECASE
         ),  # terraform apply --destroy / -destroy
         re.compile(
-            r"kubectl\s+delete\s+(namespace|ns|deployment|service|pod|pv|pvc|secret|configmap|statefulset|daemonset|ingress)\b",
+            r"kubectl\s+delete\s+(namespace|ns|deployment|service|pod|secret|configmap|daemonset|ingress)\b",
             re.IGNORECASE,
         ),
+        # pv/pvc/statefulset excluded from instant-deny — agents in argocd repo
+        # legitimately delete PVCs and scale statefulsets to zero.
+        # These fall through to Tier 3 → human approval via confidence cap.
         re.compile(
             r"kubectl\s+delete\s+(-f\s|--filename[=\s])", re.IGNORECASE
         ),  # kubectl delete -f <file>

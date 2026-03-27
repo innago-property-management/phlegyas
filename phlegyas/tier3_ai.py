@@ -74,6 +74,26 @@ CONFIDENCE_CAPS: dict[str, tuple[float, list[re.Pattern[str]]]] = {
             re.compile(r"--env[= ]prod", re.IGNORECASE),
         ],
     ),
+    "github_workflow_mutation": (
+        0.50,  # Writes to CI/CD workflows should get human review
+        [
+            re.compile(r"\.github/workflows/", re.IGNORECASE),
+            re.compile(r"\.github/actions/", re.IGNORECASE),
+        ],
+    ),
+    "data_loss_k8s": (
+        0.15,  # Data loss scenario — always requires human approval, no exceptions
+        [
+            re.compile(r"kubectl\s+delete\s+pvc?\b", re.IGNORECASE),
+            re.compile(r"kubectl\s+delete\s+statefulset\b", re.IGNORECASE),
+        ],
+    ),
+    "k8s_statefulset_scale": (
+        0.60,  # Scaling statefulsets is legitimate but warrants review
+        [
+            re.compile(r"kubectl\s+scale\s+statefulset\b", re.IGNORECASE),
+        ],
+    ),
     "credential_adjacent": (
         0.60,
         [
