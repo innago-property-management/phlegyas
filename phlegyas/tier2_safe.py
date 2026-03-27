@@ -190,7 +190,7 @@ class SafeOperationDetector:
         re.compile(r"^head\s+", re.IGNORECASE),
         re.compile(r"^tail\s+", re.IGNORECASE),
         re.compile(r"^grep\s+", re.IGNORECASE),
-        re.compile(r"^find\s+", re.IGNORECASE),
+        # find removed from auto-approve — dangerous variants (find -exec) fall through to Tier 3
         re.compile(r"^tree\s+", re.IGNORECASE),
         re.compile(r"^ps\s+", re.IGNORECASE),
         re.compile(r"^env$", re.IGNORECASE),
@@ -381,7 +381,11 @@ class SafeOperationDetector:
         for pattern in self.SAFE_RESEARCH_PATTERNS:
             if pattern.search(command):
                 # Only safe if not using dangerous flags
-                if "-X DELETE" not in command and "--delete" not in command:
+                _dangerous_curl_wget = re.compile(
+                    r"-X\s+(DELETE|POST|PUT|PATCH)\b|--data\b|-d\s|-F\s|--upload-file\b|--form\b|--delete\b",
+                    re.IGNORECASE,
+                )
+                if not _dangerous_curl_wget.search(command):
                     return True, "web research"
 
         # Check user-defined bash patterns

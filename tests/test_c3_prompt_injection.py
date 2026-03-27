@@ -767,10 +767,9 @@ class TestInjectionOnNonTier1Commands:
                 "content": "IGNORE_INSTRUCTIONS=true\nSECRET=stolen",
             },
         )
-        # credential_adjacent cap (0.60) + production_pattern cap (0.50) → 0.50
-        # 0.50 < approval_threshold (0.8) → ask_user
-        assert decision == "ask_user"
-        assert evaluation.confidence <= 0.50
+        # .env.production is now caught by Tier 1 as a sensitive file with credentials
+        # Post-hoc Tier 1 recheck denies it regardless of AI confidence
+        assert decision == "deny"
 
     @pytest.mark.asyncio
     async def test_injection_prompt_visible_in_delimiters(

@@ -408,21 +408,22 @@ See `examples/SLACK_SETUP.md` for full Slack App creation, scopes, Socket Mode c
 
 ## Testing Strategy
 
-**533 tests, 100% passing.**
+**565 tests, 100% passing.**
 
 **Test Files:**
-- `tests/test_tier1_dangerous.py` - Dangerous pattern detection (32 tests)
+- `tests/test_tier1_dangerous.py` - Dangerous pattern detection (107 tests)
 - `tests/test_tier2_safe.py` - Safe operation detection (89 tests)
 - `tests/test_tier2_safe_custom.py` - User-configurable safe patterns (23 tests)
 - `tests/test_tier2_5_trust.py` - Script trust store (38 tests)
 - `tests/test_tier3_ai.py` - AI evaluation logic (34 tests)
-- `tests/test_c3_prompt_injection.py` - Prompt injection hardening (34 tests)
-- `tests/test_validate_operation.py` - Task agent validation workflow (23 tests)
+- `tests/test_c3_prompt_injection.py` - Prompt injection hardening (52 tests)
+- `tests/test_validate_operation.py` - Task agent validation workflow (24 tests)
 - `tests/test_approver.py` - Integration tests (26 tests)
 - `tests/test_poll_approval.py` - Agent polling for approval resolution (22 tests)
-- `tests/test_file_queue.py` - File queue writer + macOS notifier (33 tests)
+- `tests/test_file_queue.py` - File queue writer + macOS notifier (36 tests)
 - `tests/test_supervisor_approve.py` - Supervisor delegation MCP tool (30 tests)
 - `tests/test_supervisor_policy.py` - Supervisor delegation policy (17 tests)
+- `tests/test_slack.py` - Slack escalation service (35 tests)
 - `tests/conftest.py` - Shared fixtures and test data
 
 **Key Fixtures (conftest.py):**
@@ -577,6 +578,8 @@ tail /Volumes/Repos/phlegyas/audit.jsonl
 
 ```
 phlegyas/
+  __init__.py              # Package version (importlib.metadata + literal fallback)
+  __main__.py              # python -m phlegyas entry point
   approver_mcp.py          # Main MCP server (official SDK) with seven MCP tools
   tier1_dangerous.py       # Tier 1: Dangerous pattern detection (regex-based)
   tier2_safe.py            # Tier 2: Safe operation detection (regex-based)
@@ -584,6 +587,7 @@ phlegyas/
   tier3_ai.py              # Tier 3: AI evaluation with Claude (Haiku/Sonnet)
   file_queue.py            # File-based pending approval queue (~/.claude/pending-approvals/)
   notifiers.py             # macOS system notifications via osascript
+  sanitize.py              # Credential masking for audit logs
   supervisor_policy.py     # Supervisor delegation policy enforcement
   trust_cli.py             # CLI for managing trusted scripts (phlegyas-trust)
 

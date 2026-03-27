@@ -64,7 +64,7 @@ class FileQueueWriter:
                 json.dump(data, f, indent=2)
 
             os.rename(str(tmp_path), str(final_path))
-            os.chmod(str(final_path), 0o644)
+            os.chmod(str(final_path), 0o600)
 
             logger.info(f"Wrote pending approval file: {final_path}")
             return final_path

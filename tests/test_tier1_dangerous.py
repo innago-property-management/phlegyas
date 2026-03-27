@@ -143,8 +143,8 @@ class TestDangerousPatternDetector:
         assert is_dangerous is True
         assert "credentials" in reason.lower()
 
-    def test_should_allow_credentials_in_gitignored_files(self, detector):
-        """Should allow credentials in .env files (assumed gitignored)."""
+    def test_should_flag_credentials_in_env_files(self, detector):
+        """Should flag credentials written to .env files as dangerous."""
         is_dangerous, reason = detector.is_dangerous(
             "Write",
             {
@@ -152,8 +152,8 @@ class TestDangerousPatternDetector:
                 "content": "API_KEY=secret123",
             },
         )
-        assert is_dangerous is False
-        assert reason is None
+        assert is_dangerous is True
+        assert "credentials" in reason.lower()
 
     # Dangerous Git Operations Tests
 

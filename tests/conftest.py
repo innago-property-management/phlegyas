@@ -179,7 +179,6 @@ def safe_info_commands() -> list[str]:
         "head -n 10 README.md",
         "tail -f logfile.txt",
         "grep 'error' logs.txt",
-        "find . -name '*.py'",
         "tree src/",
         "ps aux",
         "env",
@@ -263,6 +262,40 @@ def safe_research_commands() -> list[str]:
         "wget https://example.com/file.txt",
         "curl -H 'Accept: application/json' https://api.example.com",
     ]
+
+
+@pytest.fixture
+def make_pending():
+    """Factory fixture for creating PendingApproval instances.
+
+    Shared across test files that need to create PendingApproval objects
+    (test_supervisor_approve, test_poll_approval, test_supervisor_policy,
+    test_file_queue).
+    """
+    from phlegyas.approver_mcp import PendingApproval
+
+    def _factory(
+        request_id="test-req-001",
+        tool_name="Bash",
+        input_data=None,
+        reason="Needs review",
+        confidence=0.65,
+        tier="tier3_needs_human",
+        workflow_id="wf-001",
+        agent_id="agent-001",
+    ) -> PendingApproval:
+        return PendingApproval(
+            request_id=request_id,
+            tool_name=tool_name,
+            input_data=input_data or {"command": "npm install some-package"},
+            reason=reason,
+            confidence=confidence,
+            tier=tier,
+            workflow_id=workflow_id,
+            agent_id=agent_id,
+        )
+
+    return _factory
 
 
 @pytest.fixture

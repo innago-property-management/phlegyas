@@ -201,17 +201,8 @@ class DangerousPatternDetector:
             "id_rsa",
         ]
 
-        # Files that SHOULD be gitignored
-        gitignore_patterns = [".env", "secrets.json", ".aws/credentials"]
-
         file_lower = file_path.lower()
 
-        # If it's a file that should be gitignored, it's not sensitive
-        # (we assume it's already gitignored)
-        if any(pattern in file_lower for pattern in gitignore_patterns):
-            return False
-
-        # Other config files are sensitive
         return any(pattern in file_lower for pattern in sensitive_patterns)
 
     def _contains_credentials(self, content: str) -> bool:

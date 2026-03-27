@@ -335,11 +335,10 @@ class TestSafeOperationDetector:
         assert is_safe is True
         assert "read-only info command" in category
 
-    def test_should_approve_find(self, detector):
-        """Should approve find."""
+    def test_should_not_auto_approve_find(self, detector):
+        """find should fall through to Tier 3 (dangerous variants like -exec exist)."""
         is_safe, category = detector.is_safe("Bash", {"command": "find . -name '*.py'"})
-        assert is_safe is True
-        assert "read-only info command" in category
+        assert is_safe is False
 
     def test_should_approve_ps(self, detector):
         """Should approve ps."""

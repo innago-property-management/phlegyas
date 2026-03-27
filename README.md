@@ -335,13 +335,15 @@ if __name__ == "__main__":
 
 ## MCP Tools
 
-The server exposes five tools:
+The server exposes seven tools:
 
 | Tool | Purpose |
 |------|---------|
 | `permissions__approve` | Main permission gate — returns `allow`/`deny` for Claude Code's `--permission-prompt-tool` flag |
 | `validate_operation` | Pre-flight check for Task agents — returns `approved`/`denied`/`pending` with request IDs |
+| `poll_approval` | Agent-oriented polling — check resolution status of a pending `request_id` |
 | `submit_approval` | Human decision submission for pending approvals (approve or deny by `request_id`) |
+| `supervisor_approve` | Supervisor agent delegation — approve/deny/escalate within workflow policy constraints |
 | `get_pending_approvals` | List pending approvals awaiting human decision (filterable by `workflow_id`/`agent_id`) |
 | `get_approval_stats` | Audit log statistics (totals, by-tier, by-tool breakdowns) |
 
@@ -441,15 +443,19 @@ pytest tests/test_tier3_ai.py -v
 pytest tests/ --cov=phlegyas --cov-report=html
 ```
 
-**Test suite: 334 tests (100% passing)**
-- Tier 1: 32 tests (dangerous patterns)
+**Test suite: 533 tests (100% passing)**
+- Tier 1: 107 tests (dangerous patterns)
 - Tier 2: 89 tests (safe operations)
 - Tier 2 custom: 23 tests (user-configurable safe patterns)
 - Tier 2.5: 38 tests (script trust store)
 - Tier 3: 34 tests (AI evaluation)
-- Prompt injection: 34 tests (injection hardening)
-- Validate Operation: 23 tests (Task agent workflow)
+- Prompt injection: 52 tests (injection hardening)
+- Validate Operation: 24 tests (Task agent workflow)
 - Integration: 26 tests (end-to-end + approver)
+- Poll Approval: 22 tests (agent polling)
+- File Queue: 36 tests (file queue + macOS notifier)
+- Supervisor Approve: 30 tests (supervisor delegation tool)
+- Supervisor Policy: 17 tests (supervisor policy)
 - Slack: 35 tests (approval service, message building, concurrency)
 
 ## Performance & Cost
@@ -575,7 +581,9 @@ export ANTHROPIC_API_KEY=sk-ant-your-key-here
 
 ## Contributing
 
-Contributions welcome! Areas for improvement:
+Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and pull request guidelines.
+
+Areas for improvement:
 
 - Additional safe operation patterns
 - Improved AI evaluation prompts

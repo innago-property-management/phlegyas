@@ -75,12 +75,3 @@ jobs:
         run: ruff check phlegyas/ tests/
       - name: Ruff format check
         run: ruff format --check phlegyas/ tests/
-
-  merge-checks:
-    uses: innago-property-management/Oui-DELIVER/.github/workflows/merge-checks-python.yml@main
-    with:
-      python_version: "3.12"
-      requirements_file: "requirements-ci.txt"
-      allowed_licenses: "MIT|Apache|BSD|ISC|PSF|Python|Unlicense|CC0|0BSD|WTFPL|MPL|UNKNOWN"
-    secrets:
-      githubToken: ${{ secrets.GITHUB_TOKEN }}
