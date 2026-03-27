@@ -84,6 +84,7 @@ class PendingApproval:
             self.expires_at = self.created_at + timedelta(seconds=self.pending_ttl_seconds)
 
     def is_expired(self) -> bool:
+        assert self.expires_at is not None, "expires_at guaranteed by __post_init__"
         return datetime.now(UTC) > self.expires_at
 
     def to_dict(self) -> dict[str, Any]:
@@ -970,11 +971,15 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
                 request_id=request_id,
             )
         )
-        task.add_done_callback(
-            lambda t: (
-                t.exception() and logger.warning("Slack notification failed: %s", t.exception())
-            )
-        )
+
+        def _log_task_error(t: asyncio.Task) -> None:
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                logger.warning("Slack notification failed: %s", exc)
+
+        task.add_done_callback(_log_task_error)
 
     return _validate_create_pending(
         tool_name,

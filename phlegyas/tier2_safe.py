@@ -265,6 +265,12 @@ class SafeOperationDetector:
         re.compile(r"^wget\s+", re.IGNORECASE),
     ]
 
+    # Dangerous curl/wget flags that bypass safe research auto-approve
+    DANGEROUS_CURL_WGET = re.compile(
+        r"-X\s+(DELETE|POST|PUT|PATCH)\b|--data\b|-d\s|-F\s|--upload-file\b|--form\b|--delete\b",
+        re.IGNORECASE,
+    )
+
     # Built-in safe write directories
     _BUILTIN_SAFE_WRITE_DIRS = [
         "/tmp/",
@@ -381,11 +387,7 @@ class SafeOperationDetector:
         for pattern in self.SAFE_RESEARCH_PATTERNS:
             if pattern.search(command):
                 # Only safe if not using dangerous flags
-                _dangerous_curl_wget = re.compile(
-                    r"-X\s+(DELETE|POST|PUT|PATCH)\b|--data\b|-d\s|-F\s|--upload-file\b|--form\b|--delete\b",
-                    re.IGNORECASE,
-                )
-                if not _dangerous_curl_wget.search(command):
+                if not self.DANGEROUS_CURL_WGET.search(command):
                     return True, "web research"
 
         # Check user-defined bash patterns

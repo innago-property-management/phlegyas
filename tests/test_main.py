@@ -25,11 +25,12 @@ class TestModuleEntryPoint:
     def test_python_m_phlegyas_help(self):
         """``python -m phlegyas`` should be runnable (smoke test via subprocess)."""
         import subprocess
+        import sys
 
         # The MCP server's run() blocks on stdio, so we just verify the import
         # works by running with a timeout and expecting it to start (not crash).
         result = subprocess.run(
-            ["python", "-c", "from phlegyas.__main__ import run; print('ok')"],
+            [sys.executable, "-c", "from phlegyas.__main__ import run; print('ok')"],
             capture_output=True,
             text=True,
             timeout=10,
