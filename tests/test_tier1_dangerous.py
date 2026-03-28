@@ -143,8 +143,8 @@ class TestDangerousPatternDetector:
         assert is_dangerous is True
         assert "credentials" in reason.lower()
 
-    def test_should_allow_credentials_in_gitignored_files(self, detector):
-        """Should allow credentials in .env files (assumed gitignored)."""
+    def test_should_flag_credentials_in_env_files(self, detector):
+        """Should flag credentials written to .env files as dangerous."""
         is_dangerous, reason = detector.is_dangerous(
             "Write",
             {
@@ -152,8 +152,8 @@ class TestDangerousPatternDetector:
                 "content": "API_KEY=secret123",
             },
         )
-        assert is_dangerous is False
-        assert reason is None
+        assert is_dangerous is True
+        assert "credentials" in reason.lower()
 
     # Dangerous Git Operations Tests
 
@@ -686,21 +686,22 @@ class TestDangerousInfraCommands:
         assert is_dangerous is True
         assert "infrastructure" in reason.lower()
 
-    def test_kubectl_delete_pv(self, detector):
-        """Should catch kubectl delete pv."""
-        is_dangerous, reason = detector.is_dangerous(
-            "Bash", {"command": "kubectl delete pv my-volume"}
-        )
-        assert is_dangerous is True
-        assert "infrastructure" in reason.lower()
+    def test_kubectl_delete_pv_falls_through(self, detector):
+        """kubectl delete pv/pvc should NOT be Tier 1 — falls to Tier 3 for human approval."""
+        is_dangerous, _ = detector.is_dangerous("Bash", {"command": "kubectl delete pv my-volume"})
+        assert is_dangerous is False
 
-    def test_kubectl_delete_pvc(self, detector):
-        """Should catch kubectl delete pvc."""
-        is_dangerous, reason = detector.is_dangerous(
-            "Bash", {"command": "kubectl delete pvc my-claim"}
+    def test_kubectl_delete_pvc_falls_through(self, detector):
+        """kubectl delete pvc should NOT be Tier 1 — data loss requires human approval, not instant deny."""
+        is_dangerous, _ = detector.is_dangerous("Bash", {"command": "kubectl delete pvc my-claim"})
+        assert is_dangerous is False
+
+    def test_kubectl_delete_statefulset_falls_through(self, detector):
+        """kubectl delete statefulset should NOT be Tier 1 — falls to Tier 3 for human approval."""
+        is_dangerous, _ = detector.is_dangerous(
+            "Bash", {"command": "kubectl delete statefulset my-sts"}
         )
-        assert is_dangerous is True
-        assert "infrastructure" in reason.lower()
+        assert is_dangerous is False
 
     def test_kubectl_delete_secret(self, detector):
         """Should catch kubectl delete secret."""
@@ -714,14 +715,6 @@ class TestDangerousInfraCommands:
         """Should catch kubectl delete configmap."""
         is_dangerous, reason = detector.is_dangerous(
             "Bash", {"command": "kubectl delete configmap app-config"}
-        )
-        assert is_dangerous is True
-        assert "infrastructure" in reason.lower()
-
-    def test_kubectl_delete_statefulset(self, detector):
-        """Should catch kubectl delete statefulset."""
-        is_dangerous, reason = detector.is_dangerous(
-            "Bash", {"command": "kubectl delete statefulset postgres"}
         )
         assert is_dangerous is True
         assert "infrastructure" in reason.lower()

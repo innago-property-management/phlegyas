@@ -14,6 +14,7 @@ C3 Prompt Injection Hardening:
 """
 
 import json
+import logging
 import os
 import re
 import secrets
@@ -24,6 +25,8 @@ from anthropic import Anthropic
 from pydantic import BaseModel
 
 from phlegyas.tier1_dangerous import DangerousPatternDetector
+
+logger = logging.getLogger(__name__)
 
 
 class Decision(StrEnum):
@@ -69,6 +72,26 @@ CONFIDENCE_CAPS: dict[str, tuple[float, list[re.Pattern[str]]]] = {
             re.compile(r"production", re.IGNORECASE),
             re.compile(r"prod[-_.]", re.IGNORECASE),
             re.compile(r"--env[= ]prod", re.IGNORECASE),
+        ],
+    ),
+    "github_workflow_mutation": (
+        0.50,  # Writes to CI/CD workflows should get human review
+        [
+            re.compile(r"\.github/workflows/", re.IGNORECASE),
+            re.compile(r"\.github/actions/", re.IGNORECASE),
+        ],
+    ),
+    "data_loss_k8s": (
+        0.15,  # Data loss scenario — always requires human approval, no exceptions
+        [
+            re.compile(r"kubectl\s+delete\s+pvc?\b", re.IGNORECASE),
+            re.compile(r"kubectl\s+delete\s+statefulset\b", re.IGNORECASE),
+        ],
+    ),
+    "k8s_statefulset_scale": (
+        0.60,  # Scaling statefulsets is legitimate but warrants review
+        [
+            re.compile(r"kubectl\s+scale\s+statefulset\b", re.IGNORECASE),
         ],
     ),
     "credential_adjacent": (
@@ -126,7 +149,7 @@ class AIEvaluator:
 
     async def evaluate(
         self, tool_name: str, input_data: dict[str, Any]
-    ) -> tuple[str, EvaluationResult]:
+    ) -> tuple[Decision, EvaluationResult]:
         """
         Evaluate a permission request using Claude AI.
 
@@ -312,7 +335,8 @@ Use the security_evaluation tool to submit your assessment."""
             if getattr(block, "type", None) == "tool_use" and block.name == "security_evaluation":
                 try:
                     return EvaluationResult(**block.input)
-                except Exception:
+                except Exception as e:
+                    logger.warning("Malformed tool_use response: %s", e)
                     return EvaluationResult(
                         decision=Decision.ASK_USER,
                         category=Category.MODERATE_RISK,
@@ -359,7 +383,7 @@ Use the security_evaluation tool to submit your assessment."""
 
         return evaluation
 
-    def _apply_thresholds(self, evaluation: EvaluationResult) -> str:
+    def _apply_thresholds(self, evaluation: EvaluationResult) -> Decision:
         """Apply confidence thresholds to AI decision."""
 
         # If AI says approve but confidence is low, escalate to human

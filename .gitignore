@@ -15,3 +15,8 @@ dist/
 htmlcov/
 .pytest_cache/
 *.log
+.ruff_cache/
+.dex/
+.specify/
+.last-thought-timestamp
+build/

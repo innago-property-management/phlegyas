@@ -10,7 +10,7 @@ import json
 import logging
 import os
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -26,7 +26,7 @@ from phlegyas.supervisor_policy import SupervisorDelegationPolicy
 from phlegyas.tier1_dangerous import DangerousPatternDetector
 from phlegyas.tier2_5_trust import ScriptTrustStore
 from phlegyas.tier2_safe import SafeOperationDetector, SafePatternStore
-from phlegyas.tier3_ai import AIEvaluator
+from phlegyas.tier3_ai import AIEvaluator, EvaluationResult
 
 # Conditional import — slack is an optional dependency
 try:
@@ -58,38 +58,34 @@ PENDING_MAX_SIZE = int(os.getenv("PENDING_MAX_SIZE", "100"))
 RESOLVED_TTL_SECONDS = 300  # 5 minutes — not configurable in v0.3.0
 
 
+@dataclass
 class PendingApproval:
     """Represents a parked operation awaiting human approval."""
 
-    def __init__(
-        self,
-        request_id: str,
-        tool_name: str,
-        input_data: dict[str, Any],
-        reason: str,
-        confidence: float | None,
-        tier: str,
-        workflow_id: str | None = None,
-        agent_id: str | None = None,
-        pending_ttl_seconds: int = 1800,
-    ):
-        self.request_id = request_id
-        self.tool_name = tool_name
-        self.input_data = input_data
-        self.reason = reason
-        self.confidence = confidence
-        self.tier = tier
-        self.workflow_id = workflow_id
-        self.agent_id = agent_id
-        self.created_at = datetime.now(UTC)
-        self.expires_at = self.created_at + timedelta(seconds=pending_ttl_seconds)
-        self.status = "pending"  # pending, approved, denied, expired
-        # Resolution tracking (populated when resolved via submit_approval or supervisor_approve)
-        self.resolved_at: datetime | None = None
-        self.resolved_by: str | None = None  # "human:<id>", "supervisor:<id>", "ttl_expiry"
-        self.resolution: str | None = None  # "approved", "denied", "expired"
+    request_id: str
+    tool_name: str
+    input_data: dict[str, Any] = field(default_factory=dict)
+    reason: str = ""
+    confidence: float | None = None
+    tier: str = ""
+    workflow_id: str | None = None
+    agent_id: str | None = None
+    pending_ttl_seconds: int = 1800
+    created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    expires_at: datetime | None = None
+    status: str = "pending"  # pending, approved, denied, expired
+    # Resolution tracking (populated when resolved via submit_approval or supervisor_approve)
+    resolved_at: datetime | None = None
+    resolved_by: str | None = None  # "human:<id>", "supervisor:<id>", "ttl_expiry"
+    resolution: str | None = None  # "approved", "denied", "expired"
+
+    def __post_init__(self) -> None:
+        if self.expires_at is None:
+            self.expires_at = self.created_at + timedelta(seconds=self.pending_ttl_seconds)
 
     def is_expired(self) -> bool:
+        if self.expires_at is None:
+            return False
         return datetime.now(UTC) > self.expires_at
 
     def to_dict(self) -> dict[str, Any]:
@@ -294,7 +290,7 @@ def write_audit_log(
     }
 
     try:
-        with open(state.audit_log_file, "a") as f:
+        with open(state.audit_log_file, "a", encoding="utf-8") as f:
             f.write(json.dumps(log_entry) + "\n")
     except Exception as e:
         logger.error(f"Failed to write audit log: {e}")
@@ -545,7 +541,7 @@ class TierResult:
     decision: str  # "allow", "deny", "ask_user", "no_ai"
     reason: str
     confidence: float | None = None
-    evaluation: Any = None  # Full EvaluationResult from Tier 3 AI
+    evaluation: EvaluationResult | None = None  # Full EvaluationResult from Tier 3 AI
 
 
 async def _evaluate_tiers(tool_name: str, input_data: dict[str, Any]) -> TierResult:
@@ -822,7 +818,24 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
     # tool_name + input_data hash, so the same operation always produces the
     # same Tier 1/2 result. Newly-added patterns won't apply until TTL expires.
     if cached is not None:
-        # Cache hit — use cached Tier 3 decision (skip Tiers 1-2.5 re-evaluation)
+        # Safety: re-check Tier 1 even on cache hit — patterns may have been
+        # added since the decision was cached.
+        is_dangerous, dangerous_reason = state.dangerous_detector.is_dangerous(
+            tool_name, input_data
+        )
+        if is_dangerous:
+            logger.warning(f"DENIED (Tier 1 on cache hit): {dangerous_reason}")
+            write_audit_log(tool_name, input_data, "deny", "tier1_dangerous", dangerous_reason)
+            result = {
+                "status": "denied",
+                "tier": "tier1_dangerous",
+                "reason": dangerous_reason,
+                "confidence": None,
+                "request_id": None,
+            }
+            return [TextContent(type="text", text=json.dumps(result))]
+
+        # Cache hit — use cached Tier 3 decision (skip Tiers 2-2.5 re-evaluation)
         decision, evaluation, cached_time = cached
         logger.info(f"Using cached decision from {cached_time.isoformat()} (Tier 3 cache hit)")
         tier_result = TierResult(
@@ -950,7 +963,7 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
     # Notify Slack if configured (fire-and-forget)
     request_id = str(uuid.uuid4())
     if state.slack_service is not None:
-        asyncio.create_task(
+        task = asyncio.create_task(
             state.slack_service.notify_pending(
                 tool_name=tool_name,
                 input_data=input_data,
@@ -959,6 +972,15 @@ async def handle_validate_operation(arguments: dict[str, Any]) -> list[TextConte
                 request_id=request_id,
             )
         )
+
+        def _log_task_error(t: asyncio.Task) -> None:
+            if t.cancelled():
+                return
+            exc = t.exception()
+            if exc is not None:
+                logger.warning("Slack notification failed: %s", exc)
+
+        task.add_done_callback(_log_task_error)
 
     return _validate_create_pending(
         tool_name,
@@ -999,7 +1021,7 @@ async def handle_get_approval_stats(arguments: dict[str, Any]) -> list[TextConte
             },
         }
 
-        with open(state.audit_log_file) as f:
+        with open(state.audit_log_file, encoding="utf-8") as f:
             for line in f:
                 try:
                     entry = json.loads(line)

@@ -51,9 +51,12 @@ class DangerousPatternDetector:
             r"terraform\s+apply\s+.*-destroy", re.IGNORECASE
         ),  # terraform apply --destroy / -destroy
         re.compile(
-            r"kubectl\s+delete\s+(namespace|ns|deployment|service|pod|pv|pvc|secret|configmap|statefulset|daemonset|ingress)\b",
+            r"kubectl\s+delete\s+(namespace|ns|deployment|service|pod|secret|configmap|daemonset|ingress)\b",
             re.IGNORECASE,
         ),
+        # pv/pvc/statefulset excluded from instant-deny — agents in argocd repo
+        # legitimately delete PVCs and scale statefulsets to zero.
+        # These fall through to Tier 3 → human approval via confidence cap.
         re.compile(
             r"kubectl\s+delete\s+(-f\s|--filename[=\s])", re.IGNORECASE
         ),  # kubectl delete -f <file>
@@ -201,17 +204,8 @@ class DangerousPatternDetector:
             "id_rsa",
         ]
 
-        # Files that SHOULD be gitignored
-        gitignore_patterns = [".env", "secrets.json", ".aws/credentials"]
-
         file_lower = file_path.lower()
 
-        # If it's a file that should be gitignored, it's not sensitive
-        # (we assume it's already gitignored)
-        if any(pattern in file_lower for pattern in gitignore_patterns):
-            return False
-
-        # Other config files are sensitive
         return any(pattern in file_lower for pattern in sensitive_patterns)
 
     def _contains_credentials(self, content: str) -> bool:

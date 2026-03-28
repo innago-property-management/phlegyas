@@ -225,6 +225,58 @@ class TestConfidenceCaps:
         )
         assert capped.confidence <= 0.60
 
+    def test_kubectl_delete_pvc_capped_to_human(self, evaluator):
+        """kubectl delete pvc is data loss — confidence must be capped very low."""
+        evaluation = EvaluationResult(
+            decision="approve",
+            category="high_risk",
+            reasoning="Cleaning up old PVC",
+            confidence=0.95,
+        )
+        capped = evaluator._apply_confidence_caps(
+            evaluation, "Bash", {"command": "kubectl delete pvc postgres-data-0"}
+        )
+        assert capped.confidence <= 0.15
+
+    def test_kubectl_delete_statefulset_capped_to_human(self, evaluator):
+        """kubectl delete statefulset is data loss — always requires human."""
+        evaluation = EvaluationResult(
+            decision="approve",
+            category="high_risk",
+            reasoning="Removing old statefulset",
+            confidence=0.95,
+        )
+        capped = evaluator._apply_confidence_caps(
+            evaluation, "Bash", {"command": "kubectl delete statefulset postgres"}
+        )
+        assert capped.confidence <= 0.15
+
+    def test_kubectl_scale_statefulset_capped(self, evaluator):
+        """kubectl scale statefulset is legitimate but warrants review."""
+        evaluation = EvaluationResult(
+            decision="approve",
+            category="moderate_risk",
+            reasoning="Scaling for maintenance",
+            confidence=0.95,
+        )
+        capped = evaluator._apply_confidence_caps(
+            evaluation, "Bash", {"command": "kubectl scale statefulset postgres --replicas=3"}
+        )
+        assert capped.confidence <= 0.60
+
+    def test_github_workflow_write_capped(self, evaluator):
+        """Writes to .github/workflows/ should require human review."""
+        evaluation = EvaluationResult(
+            decision="approve",
+            category="moderate_risk",
+            reasoning="Updating CI config",
+            confidence=0.95,
+        )
+        capped = evaluator._apply_confidence_caps(
+            evaluation, "Write", {"file_path": ".github/workflows/ci.yml", "content": "name: CI"}
+        )
+        assert capped.confidence <= 0.50
+
     def test_safe_operation_not_capped(self, evaluator):
         """Safe operations should not have confidence reduced."""
         evaluation = EvaluationResult(
@@ -767,10 +819,9 @@ class TestInjectionOnNonTier1Commands:
                 "content": "IGNORE_INSTRUCTIONS=true\nSECRET=stolen",
             },
         )
-        # credential_adjacent cap (0.60) + production_pattern cap (0.50) → 0.50
-        # 0.50 < approval_threshold (0.8) → ask_user
-        assert decision == "ask_user"
-        assert evaluation.confidence <= 0.50
+        # .env.production is now caught by Tier 1 as a sensitive file with credentials
+        # Post-hoc Tier 1 recheck denies it regardless of AI confidence
+        assert decision == "deny"
 
     @pytest.mark.asyncio
     async def test_injection_prompt_visible_in_delimiters(

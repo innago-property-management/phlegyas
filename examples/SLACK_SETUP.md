@@ -155,7 +155,7 @@ python phlegyas/approver_mcp.py
 
 2. Trigger a high-risk operation via Claude Code:
 ```bash
-claude --permission-prompt-tool mcp__permission-approver__permissions__approve \
+claude --permission-prompt-tool mcp__phlegyas__permissions__approve \
   -p "Delete all files in /tmp/test"
 ```
 

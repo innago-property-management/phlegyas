@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-03-27
+
+### Added
+
+- **Tier 2.5: Script trust store (TOFU):** Human-trusted scripts auto-approved via SHA-256 content hashing with `phlegyas-trust` CLI
+- **Supervisor delegation:** `supervisor_approve` MCP tool for supervisor agents to approve/deny/escalate pending requests within workflow policy constraints
+- **`poll_approval` MCP tool:** Agent-oriented polling to check resolution status of pending approval requests
+- **File queue for pending approvals:** JSON files written to `~/.claude/pending-approvals/` for cross-session visibility and external tool integration (Pharos)
+- **macOS system notifications:** `osascript`-based notifications when pending approvals are created (darwin only, configurable via `PHLEGYAS_NOTIFY_MACOS`)
+- **User-configurable safe patterns:** `SafePatternStore` loads project/user patterns from `~/.claude/safe-patterns.json` to augment built-in Tier 2 defaults
+- **Prompt injection hardening:** System/user prompt separation, random delimiters, input truncation, confidence caps, structured `tool_use` output, Tier 1 post-hoc re-check (52 tests)
+- **Supervisor policy enforcement:** Workflow-scoped delegation with confidence floor, Tier 1 override protection, and recursion guard
+
+### Changed
+
+- **StrEnums for Decision/Category:** Replaced string literals with `Decision` and `Category` StrEnums for type safety
+- **ApproverState encapsulation:** Centralized mutable server state (pending approvals, cache, audit log) into `ApproverState` dataclass
+- MCP server now exposes seven tools (added `poll_approval` and `supervisor_approve`)
+- 575 tests (100% passing)
+
 ## [0.2.0] - 2026-03-18
 
 ### Added
@@ -49,6 +69,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - JSONL audit logging with credential masking
 - 299 tests (100% passing)
 
+[0.3.0]: https://github.com/innago-property-management/phlegyas/releases/tag/0.3.0
 [0.2.0]: https://github.com/innago-property-management/phlegyas/releases/tag/0.2.0
 [0.1.1]: https://github.com/innago-property-management/phlegyas/releases/tag/0.1.1
 [0.1.0]: https://github.com/innago-property-management/phlegyas/releases/tag/0.1.0

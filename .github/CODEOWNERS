@@ -1,12 +1,12 @@
 # Default owners for everything in the repo
-* @innago-property-management/innago-open-source
+* @christopheranderson
 
 # Python source
-phlegyas/ @innago-property-management/innago-open-source
-tests/ @innago-property-management/innago-open-source
+phlegyas/ @christopheranderson
+tests/ @christopheranderson
 
 # CI/CD
-.github/ @innago-property-management/innago-open-source
+.github/ @christopheranderson
 
 # Documentation
-**/*.md @innago-property-management/innago-open-source
+**/*.md @christopheranderson

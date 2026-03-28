@@ -127,27 +127,26 @@ class TestValidateOperationTier3:
     """Tests for Tier 3 AI evaluation in validate_operation."""
 
     @pytest.mark.asyncio
-    @patch("phlegyas.tier3_ai.AIEvaluator.__init__", return_value=None)
-    async def test_should_handle_ai_unavailable(self, mock_ai_init):
-        """Validate_operation should return needs_human when AI is unavailable."""
-        # Mock AIEvaluator to simulate unavailability
-        # The actual implementation checks if ai_evaluator is None
+    async def test_should_handle_ai_unavailable(self):
+        """Validate_operation should return pending/needs_human when AI is unavailable."""
+        from phlegyas import approver_mcp
 
-        # Use a custom tool that won't match Tier 1 or Tier 2 patterns
-        result = await handle_validate_operation(
-            {"tool_name": "CustomTool", "input": {"action": "perform_custom_action"}}
-        )
+        original_evaluator = approver_mcp.state.ai_evaluator
+        try:
+            # Simulate AI unavailability by removing the evaluator
+            approver_mcp.state.ai_evaluator = None
 
-        response = json.loads(result[0].text)
-        # Without AI, ambiguous operations should return needs_human or be approved by Tier 2
-        # Since CustomTool is unknown, it should either be approved (no patterns match)
-        # or needs_human (if AI is truly unavailable)
-        assert response["status"] in ["approved", "needs_human", "pending"]
+            # Use a custom tool that won't match Tier 1 or Tier 2 patterns
+            result = await handle_validate_operation(
+                {"tool_name": "CustomTool", "input": {"action": "perform_custom_action"}}
+            )
 
-        # If needs_human, verify proper format
-        if response["status"] == "needs_human":
-            assert response["request_id"] is not None
-            uuid.UUID(response["request_id"])
+            response = json.loads(result[0].text)
+            # Without AI, ambiguous operations should get pending/needs_human
+            assert response["status"] in ["pending", "needs_human"]
+            assert response["tier"] == "tier3_no_ai"
+        finally:
+            approver_mcp.state.ai_evaluator = original_evaluator
 
     @pytest.mark.asyncio
     async def test_should_return_proper_reasoning_on_success(self):

@@ -6,6 +6,7 @@ fire-and-forget and never raise exceptions.
 """
 
 import logging
+import re
 import shutil
 import subprocess
 import sys
@@ -29,9 +30,16 @@ class MacOSNotifier:
         """
         try:
             title = "Phlegyas: Approval Required"
-            truncated_reason = reason[:80]
+
+            # Sanitize tool_name: alphanumeric + underscore + hyphen only, max 100 chars
+            safe_tool = re.sub(r"[^a-zA-Z0-9_\-]", "", tool_name)[:100]
+
+            # Sanitize reason: strip non-printable characters, truncate to 200 chars
+            safe_reason = re.sub(r"[^\x20-\x7E]", "", reason)[:200]
+
             short_id = request_id[:8]
-            msg = f"{tool_name}: {truncated_reason} (id: {short_id})"
+            truncated_reason = safe_reason[:80]
+            msg = f"{safe_tool}: {truncated_reason} (id: {short_id})"
 
             # Escape double quotes and backslashes for AppleScript string literals
             msg = msg.replace("\\", "\\\\").replace('"', '\\"')

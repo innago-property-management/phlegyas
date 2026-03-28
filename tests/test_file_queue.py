@@ -101,7 +101,7 @@ class TestFileQueueWriter:
         assert mode == 0o700
 
     def test_write_pending_file_permissions(self, tmp_path):
-        """Written files should have 0o644 permissions."""
+        """Written files should have 0o600 permissions (owner-only)."""
         from phlegyas.file_queue import FileQueueWriter
 
         writer = FileQueueWriter(queue_dir=tmp_path)
@@ -110,7 +110,7 @@ class TestFileQueueWriter:
 
         file_path = tmp_path / "test-req-001.json"
         mode = file_path.stat().st_mode & 0o777
-        assert mode == 0o644
+        assert mode == 0o600
 
     def test_resolve_updates_file_status(self, tmp_path):
         """resolve should update the file's status field."""
