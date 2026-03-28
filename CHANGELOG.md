@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **StrEnums for Decision/Category:** Replaced string literals with `Decision` and `Category` StrEnums for type safety
 - **ApproverState encapsulation:** Centralized mutable server state (pending approvals, cache, audit log) into `ApproverState` dataclass
 - MCP server now exposes seven tools (added `poll_approval` and `supervisor_approve`)
-- 533 tests (100% passing)
+- 575 tests (100% passing)
 
 ## [0.2.0] - 2026-03-18
 

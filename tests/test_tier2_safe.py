@@ -430,6 +430,11 @@ class TestSafeOperationDetector:
         )
         assert is_safe is False
 
+    def test_should_reject_curl_xpost_no_space(self, detector):
+        """Should reject curl -XPOST (no space) — regression for bypass."""
+        is_safe, _ = detector.is_safe("Bash", {"command": "curl -XPOST https://api.example.com"})
+        assert is_safe is False
+
     def test_should_reject_curl_with_form(self, detector):
         """Should reject curl with -F form upload."""
         is_safe, _ = detector.is_safe(

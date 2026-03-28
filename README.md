@@ -443,7 +443,7 @@ pytest tests/test_tier3_ai.py -v
 pytest tests/ --cov=phlegyas --cov-report=html
 ```
 
-**Test suite: 533 tests (100% passing)**
+**Test suite: 575 tests (100% passing)**
 - Tier 1: 107 tests (dangerous patterns)
 - Tier 2: 89 tests (safe operations)
 - Tier 2 custom: 23 tests (user-configurable safe patterns)

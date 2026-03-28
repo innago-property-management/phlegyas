@@ -267,7 +267,7 @@ class SafeOperationDetector:
 
     # Dangerous curl/wget flags that bypass safe research auto-approve
     DANGEROUS_CURL_WGET = re.compile(
-        r"-X\s+(DELETE|POST|PUT|PATCH)\b|--data\b|-d\s|-F\s|--upload-file\b|--form\b|--delete\b",
+        r"-X\s*(DELETE|POST|PUT|PATCH)\b|--data\b|-d\s|-F\s|--upload-file\b|--form\b|--delete\b",
         re.IGNORECASE,
     )
 

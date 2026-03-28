@@ -84,7 +84,8 @@ class PendingApproval:
             self.expires_at = self.created_at + timedelta(seconds=self.pending_ttl_seconds)
 
     def is_expired(self) -> bool:
-        assert self.expires_at is not None, "expires_at guaranteed by __post_init__"
+        if self.expires_at is None:
+            return False
         return datetime.now(UTC) > self.expires_at
 
     def to_dict(self) -> dict[str, Any]:

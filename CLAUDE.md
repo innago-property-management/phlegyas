@@ -408,7 +408,7 @@ See `examples/SLACK_SETUP.md` for full Slack App creation, scopes, Socket Mode c
 
 ## Testing Strategy
 
-**565 tests, 100% passing.**
+**575 tests, 100% passing.**
 
 **Test Files:**
 - `tests/test_tier1_dangerous.py` - Dangerous pattern detection (107 tests)
