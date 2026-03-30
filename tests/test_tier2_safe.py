@@ -442,6 +442,112 @@ class TestSafeOperationDetector:
         )
         assert is_safe is False
 
+    # Filesystem and shell builtin commands
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "mkdir -p src/components",
+            "touch README.md",
+        ],
+    )
+    def test_should_approve_filesystem_operations(self, detector, command):
+        """Should approve safe filesystem ops with correct category."""
+        is_safe, category = detector.is_safe("Bash", {"command": command})
+        assert is_safe is True, f"Failed to approve: {command}"
+        assert "safe filesystem operation" in category
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "sleep 5",
+            "export PATH=/usr/local/bin:$PATH",
+            "test -f file.txt",
+            "[ -d /tmp ]",
+            "command -v python3",
+            "type git",
+            "true",
+            "false",
+        ],
+    )
+    def test_should_approve_shell_builtins(self, detector, command):
+        """Should approve shell builtins."""
+        is_safe, category = detector.is_safe("Bash", {"command": command})
+        assert is_safe is True, f"Failed to approve: {command}"
+        assert "read-only info command" in category
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "say 'Build complete'",
+            "open https://github.com",
+            "pbcopy",
+            "pbpaste",
+            "vt title 'Running tests'",
+            "lsof -i :8080",
+            "pgrep node",
+        ],
+    )
+    def test_should_approve_macos_and_utility_commands(self, detector, command):
+        """Should approve macOS utilities and dev tooling."""
+        is_safe, category = detector.is_safe("Bash", {"command": command})
+        assert is_safe is True, f"Failed to approve: {command}"
+        assert "read-only info command" in category
+
+    # Security: cp/mv should NOT be auto-approved (can exfiltrate sensitive files)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "cp .env /tmp/",
+            "cp .aws/credentials /tmp/leak",
+            "cp secrets.json /tmp/",
+            "mv .env /tmp/",
+            "mv .aws/credentials /tmp/exfil",
+        ],
+    )
+    def test_should_not_auto_approve_cp_mv_sensitive_files(self, detector, command):
+        """cp/mv can exfiltrate credentials — must fall through to Tier 3."""
+        is_safe, _ = detector.is_safe("Bash", {"command": command})
+        assert is_safe is False, f"Should NOT auto-approve: {command}"
+
+    def test_should_not_auto_approve_cp(self, detector):
+        """cp should not be in Tier 2 safe patterns at all."""
+        is_safe, _ = detector.is_safe("Bash", {"command": "cp file1.txt file2.txt"})
+        assert is_safe is False
+
+    def test_should_not_auto_approve_mv(self, detector):
+        """mv should not be in Tier 2 safe patterns at all."""
+        is_safe, _ = detector.is_safe("Bash", {"command": "mv old.py new.py"})
+        assert is_safe is False
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "chmod 777 .env",
+            "chmod 644 .aws/credentials",
+            "chmod 755 .ssh/id_rsa",
+            "chmod a+r secrets.json",
+        ],
+    )
+    def test_should_not_auto_approve_chmod(self, detector, command):
+        """chmod can make credential files world-readable — must fall to Tier 3."""
+        is_safe, _ = detector.is_safe("Bash", {"command": command})
+        assert is_safe is False, f"Should NOT auto-approve: {command}"
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "ln -s ~/.aws/credentials /tmp/creds",
+            "ln -s .env /public/env-file",
+            "ln -sf /dev/null ~/.bashrc",
+        ],
+    )
+    def test_should_not_auto_approve_ln(self, detector, command):
+        """ln can symlink sensitive files to accessible locations — must fall to Tier 3."""
+        is_safe, _ = detector.is_safe("Bash", {"command": command})
+        assert is_safe is False, f"Should NOT auto-approve: {command}"
+
     # Write Operations Tests
 
     def test_should_approve_tmp_write(self, detector):

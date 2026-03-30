@@ -247,6 +247,33 @@ class SafeOperationDetector:
         re.compile(r"^md5(sum)?\s+", re.IGNORECASE),
         re.compile(r"^sha256sum\s+", re.IGNORECASE),
         re.compile(r"^shasum\s+", re.IGNORECASE),
+        # Shell builtins and misc
+        re.compile(r"^(true|false|:)\s*$", re.IGNORECASE),
+        re.compile(r"^sleep\s+", re.IGNORECASE),
+        re.compile(r"^test\s+", re.IGNORECASE),
+        re.compile(r"^\[\s+", re.IGNORECASE),  # [ -d /tmp ] but not [[ expressions
+        re.compile(r"^type\s+", re.IGNORECASE),
+        re.compile(r"^command\s+-v\s+", re.IGNORECASE),
+        re.compile(r"^export\s+", re.IGNORECASE),
+        # macOS utilities
+        re.compile(r"^say\s+", re.IGNORECASE),
+        re.compile(r"^open\s+", re.IGNORECASE),
+        re.compile(r"^pbcopy", re.IGNORECASE),
+        re.compile(r"^pbpaste", re.IGNORECASE),
+        # VibeTunnel
+        re.compile(r"^vt\s+", re.IGNORECASE),
+        # Process management (read-only)
+        re.compile(r"^lsof\s+", re.IGNORECASE),
+        re.compile(r"^pgrep\s+", re.IGNORECASE),
+    ]
+
+    # Filesystem operations (non-destructive, no data exfiltration risk)
+    # NOTE: cp, mv, chmod, ln deliberately excluded — all can expose sensitive
+    # files (cp/mv exfiltrate, chmod makes world-readable, ln creates symlinks
+    # to credentials). These fall through to Tier 3 for AI evaluation.
+    SAFE_FILESYSTEM_PATTERNS = [
+        re.compile(r"^mkdir\s+", re.IGNORECASE),
+        re.compile(r"^touch\s+", re.IGNORECASE),
     ]
 
     # Package installation (generally safe in dev environments)
@@ -377,6 +404,11 @@ class SafeOperationDetector:
         for pattern in self.SAFE_INFO_PATTERNS:
             if pattern.search(command):
                 return True, "read-only info command"
+
+        # Check filesystem operations (mkdir, touch, chmod, ln — NOT cp/mv)
+        for pattern in self.SAFE_FILESYSTEM_PATTERNS:
+            if pattern.search(command):
+                return True, "safe filesystem operation"
 
         # Check package installation
         for pattern in self.SAFE_INSTALL_PATTERNS:
