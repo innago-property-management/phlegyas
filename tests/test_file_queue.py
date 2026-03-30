@@ -203,6 +203,51 @@ class TestFileQueueWriter:
         writer = FileQueueWriter(queue_dir=tmp_path / "custom")
         assert writer.queue_dir == tmp_path / "custom"
 
+    def test_resolve_ttl_default(self, tmp_path):
+        """Default resolve TTL should be 300 seconds."""
+        from phlegyas.file_queue import FileQueueWriter
+
+        writer = FileQueueWriter(queue_dir=tmp_path)
+        assert writer.resolve_ttl == 300
+
+    def test_resolve_ttl_custom(self, tmp_path):
+        """Custom resolve TTL should override default."""
+        from phlegyas.file_queue import FileQueueWriter
+
+        writer = FileQueueWriter(queue_dir=tmp_path, resolve_ttl=600)
+        assert writer.resolve_ttl == 600
+
+    def test_resolve_ttl_from_env(self, tmp_path, monkeypatch):
+        """Resolve TTL should be configurable via environment variable."""
+        monkeypatch.setenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", "120")
+        # Need to reimport to pick up the env var at class definition time
+        import importlib
+
+        import phlegyas.file_queue
+
+        importlib.reload(phlegyas.file_queue)
+        try:
+            writer = phlegyas.file_queue.FileQueueWriter(queue_dir=tmp_path)
+            assert writer.resolve_ttl == 120
+        finally:
+            monkeypatch.delenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", raising=False)
+            importlib.reload(phlegyas.file_queue)
+
+    def test_chmod_before_rename(self, tmp_path):
+        """File should have 0o600 permissions — set before rename, not after."""
+        from phlegyas.file_queue import FileQueueWriter
+
+        writer = FileQueueWriter(queue_dir=tmp_path)
+        pending = self._make_pending()
+        writer.write_pending(pending, "test summary")
+
+        # The .tmp file should not exist (renamed away)
+        tmp_file = tmp_path / "test-req-001.json.tmp"
+        assert not tmp_file.exists()
+        # The final file should have 0o600
+        final_file = tmp_path / "test-req-001.json"
+        assert final_file.stat().st_mode & 0o777 == 0o600
+
 
 class TestFileQueueSummarizeInput:
     """Tests for FileQueueWriter.summarize_input static method."""

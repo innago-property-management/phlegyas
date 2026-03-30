@@ -14,11 +14,17 @@ _SENSITIVE_PATTERNS = [
     re.compile(r"(secret\s*=\s*)(\S+)", re.IGNORECASE),
     re.compile(r"(api[_-]?key\s*=?\s*)(\S+)", re.IGNORECASE),
     re.compile(r"(AWS_SECRET\S*\s*=?\s*)(\S+)", re.IGNORECASE),
+    re.compile(r"(AWS_SESSION_TOKEN\s*=?\s*)(\S+)", re.IGNORECASE),
     re.compile(r"(ANTHROPIC_API_KEY\s*=?\s*)(\S+)", re.IGNORECASE),
     re.compile(r"(Bearer\s+)(\S+)", re.IGNORECASE),
     re.compile(r"(sk-ant-\S{4})\S+", re.IGNORECASE),
     re.compile(r"(xoxb-\S{4})\S+", re.IGNORECASE),
     re.compile(r"(token\s*=\s*)(\S+)", re.IGNORECASE),
+    # GitHub PATs
+    re.compile(r"(ghp_)\S+", re.IGNORECASE),
+    re.compile(r"(github_pat_)\S+", re.IGNORECASE),
+    # URL-embedded credentials (user:password@host)
+    re.compile(r"(://\w+:)\S+(@)", re.IGNORECASE),
 ]
 
 

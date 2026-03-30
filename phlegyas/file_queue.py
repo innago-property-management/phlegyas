@@ -29,9 +29,11 @@ class FileQueueWriter:
     """
 
     DEFAULT_QUEUE_DIR = Path.home() / ".claude" / "pending-approvals"
+    DEFAULT_RESOLVE_TTL = int(os.getenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", "300"))
 
-    def __init__(self, queue_dir: Path | None = None):
+    def __init__(self, queue_dir: Path | None = None, resolve_ttl: int | None = None):
         self.queue_dir = queue_dir if queue_dir is not None else self.DEFAULT_QUEUE_DIR
+        self.resolve_ttl = resolve_ttl if resolve_ttl is not None else self.DEFAULT_RESOLVE_TTL
 
     def write_pending(self, pending: Any, input_summary: str) -> Path | None:
         """
@@ -59,12 +61,13 @@ class FileQueueWriter:
             final_path = self.queue_dir / f"{pending.request_id}.json"
             tmp_path = self.queue_dir / f"{pending.request_id}.json.tmp"
 
-            # Atomic write: write to tmp, then rename
+            # Atomic write: chmod tmp before rename to avoid brief
+            # window where file has umask-default permissions
             with open(tmp_path, "w") as f:
                 json.dump(data, f, indent=2)
 
+            os.chmod(str(tmp_path), 0o600)
             os.rename(str(tmp_path), str(final_path))
-            os.chmod(str(final_path), 0o600)
 
             logger.info(f"Wrote pending approval file: {final_path}")
             return final_path
@@ -105,8 +108,9 @@ class FileQueueWriter:
 
             logger.info(f"Resolved approval file: {request_id} -> {resolution}")
 
-            # Schedule deletion
-            self.delete_after(request_id, delay_seconds=60)
+            # Schedule deletion after configurable TTL (default 300s)
+            # to give external watchers (Cygnus/Pharos) time to observe resolution
+            self.delete_after(request_id, delay_seconds=self.resolve_ttl)
 
         except Exception as e:
             logger.warning(f"Failed to resolve approval file {request_id}: {e}")
