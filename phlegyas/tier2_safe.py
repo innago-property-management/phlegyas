@@ -268,12 +268,12 @@ class SafeOperationDetector:
     ]
 
     # Filesystem operations (non-destructive, no data exfiltration risk)
-    # NOTE: cp and mv deliberately excluded — can exfiltrate .env, credentials
+    # NOTE: cp, mv, chmod, ln deliberately excluded — all can expose sensitive
+    # files (cp/mv exfiltrate, chmod makes world-readable, ln creates symlinks
+    # to credentials). These fall through to Tier 3 for AI evaluation.
     SAFE_FILESYSTEM_PATTERNS = [
         re.compile(r"^mkdir\s+", re.IGNORECASE),
         re.compile(r"^touch\s+", re.IGNORECASE),
-        re.compile(r"^chmod\s+", re.IGNORECASE),
-        re.compile(r"^ln\s+", re.IGNORECASE),
     ]
 
     # Package installation (generally safe in dev environments)
