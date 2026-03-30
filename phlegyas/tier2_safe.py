@@ -251,7 +251,7 @@ class SafeOperationDetector:
         re.compile(r"^(true|false|:)\s*$", re.IGNORECASE),
         re.compile(r"^sleep\s+", re.IGNORECASE),
         re.compile(r"^test\s+", re.IGNORECASE),
-        re.compile(r"^\[", re.IGNORECASE),
+        re.compile(r"^\[\s+", re.IGNORECASE),  # [ -d /tmp ] but not [[ expressions
         re.compile(r"^type\s+", re.IGNORECASE),
         re.compile(r"^command\s+-v\s+", re.IGNORECASE),
         re.compile(r"^export\s+", re.IGNORECASE),
