@@ -247,6 +247,31 @@ class SafeOperationDetector:
         re.compile(r"^md5(sum)?\s+", re.IGNORECASE),
         re.compile(r"^sha256sum\s+", re.IGNORECASE),
         re.compile(r"^shasum\s+", re.IGNORECASE),
+        # Filesystem operations (non-destructive)
+        re.compile(r"^mkdir\s+", re.IGNORECASE),
+        re.compile(r"^touch\s+", re.IGNORECASE),
+        re.compile(r"^cp\s+", re.IGNORECASE),
+        re.compile(r"^mv\s+", re.IGNORECASE),
+        re.compile(r"^chmod\s+", re.IGNORECASE),
+        re.compile(r"^ln\s+", re.IGNORECASE),
+        # Shell builtins and misc
+        re.compile(r"^(true|false|:)\s*$", re.IGNORECASE),
+        re.compile(r"^sleep\s+", re.IGNORECASE),
+        re.compile(r"^test\s+", re.IGNORECASE),
+        re.compile(r"^\[", re.IGNORECASE),
+        re.compile(r"^type\s+", re.IGNORECASE),
+        re.compile(r"^command\s+-v\s+", re.IGNORECASE),
+        re.compile(r"^export\s+", re.IGNORECASE),
+        # macOS utilities
+        re.compile(r"^say\s+", re.IGNORECASE),
+        re.compile(r"^open\s+", re.IGNORECASE),
+        re.compile(r"^pbcopy", re.IGNORECASE),
+        re.compile(r"^pbpaste", re.IGNORECASE),
+        # VibeTunnel
+        re.compile(r"^vt\s+", re.IGNORECASE),
+        # Process management (read-only)
+        re.compile(r"^lsof\s+", re.IGNORECASE),
+        re.compile(r"^pgrep\s+", re.IGNORECASE),
     ]
 
     # Package installation (generally safe in dev environments)

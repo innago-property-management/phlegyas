@@ -442,6 +442,51 @@ class TestSafeOperationDetector:
         )
         assert is_safe is False
 
+    # Filesystem and shell builtin commands
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "mkdir -p src/components",
+            "touch README.md",
+            "cp file1.txt file2.txt",
+            "mv old.py new.py",
+            "chmod 755 script.sh",
+            "ln -s target link",
+            "sleep 5",
+            "export PATH=/usr/local/bin:$PATH",
+            "test -f file.txt",
+            "[ -d /tmp ]",
+            "command -v python3",
+            "type git",
+            "true",
+            "false",
+        ],
+    )
+    def test_should_approve_filesystem_and_shell_builtins(self, detector, command):
+        """Should approve common filesystem ops and shell builtins."""
+        is_safe, category = detector.is_safe("Bash", {"command": command})
+        assert is_safe is True, f"Failed to approve: {command}"
+        assert "read-only info command" in category
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "say 'Build complete'",
+            "open https://github.com",
+            "pbcopy",
+            "pbpaste",
+            "vt title 'Running tests'",
+            "lsof -i :8080",
+            "pgrep node",
+        ],
+    )
+    def test_should_approve_macos_and_utility_commands(self, detector, command):
+        """Should approve macOS utilities and dev tooling."""
+        is_safe, category = detector.is_safe("Bash", {"command": command})
+        assert is_safe is True, f"Failed to approve: {command}"
+        assert "read-only info command" in category
+
     # Write Operations Tests
 
     def test_should_approve_tmp_write(self, detector):
