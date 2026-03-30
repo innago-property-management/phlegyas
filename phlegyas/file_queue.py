@@ -30,8 +30,16 @@ class FileQueueWriter:
 
     DEFAULT_QUEUE_DIR = Path.home() / ".claude" / "pending-approvals"
 
-    def __init__(self, queue_dir: Path | None = None):
+    def __init__(self, queue_dir: Path | None = None, resolve_ttl: int | None = None):
         self.queue_dir = queue_dir if queue_dir is not None else self.DEFAULT_QUEUE_DIR
+        if resolve_ttl is not None:
+            self.resolve_ttl = resolve_ttl
+        else:
+            try:
+                self.resolve_ttl = int(os.getenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", "300"))
+            except ValueError:
+                logger.warning("Invalid PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS, using default 300")
+                self.resolve_ttl = 300
 
     def write_pending(self, pending: Any, input_summary: str) -> Path | None:
         """
@@ -59,12 +67,13 @@ class FileQueueWriter:
             final_path = self.queue_dir / f"{pending.request_id}.json"
             tmp_path = self.queue_dir / f"{pending.request_id}.json.tmp"
 
-            # Atomic write: write to tmp, then rename
+            # Atomic write: chmod tmp before rename to avoid brief
+            # window where file has umask-default permissions
             with open(tmp_path, "w") as f:
                 json.dump(data, f, indent=2)
 
+            os.chmod(str(tmp_path), 0o600)
             os.rename(str(tmp_path), str(final_path))
-            os.chmod(str(final_path), 0o600)
 
             logger.info(f"Wrote pending approval file: {final_path}")
             return final_path
@@ -97,16 +106,18 @@ class FileQueueWriter:
             data["decided_by"] = decided_by
             data["decided_at"] = datetime.now(UTC).isoformat()
 
-            # Atomic update
+            # Atomic update: chmod tmp before rename (same as write_pending)
             tmp_path = self.queue_dir / f"{request_id}.json.tmp"
             with open(tmp_path, "w") as f:
                 json.dump(data, f, indent=2)
+            os.chmod(str(tmp_path), 0o600)
             os.rename(str(tmp_path), str(file_path))
 
             logger.info(f"Resolved approval file: {request_id} -> {resolution}")
 
-            # Schedule deletion
-            self.delete_after(request_id, delay_seconds=60)
+            # Schedule deletion after configurable TTL (default 300s)
+            # to give external watchers (Cygnus/Pharos) time to observe resolution
+            self.delete_after(request_id, delay_seconds=self.resolve_ttl)
 
         except Exception as e:
             logger.warning(f"Failed to resolve approval file {request_id}: {e}")
