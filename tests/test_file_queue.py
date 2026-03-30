@@ -127,6 +127,42 @@ class TestFileQueueWriter:
         assert data["decided_by"] == "human:alice"
         assert "decided_at" in data
 
+    def test_resolve_chmod_before_rename(self, tmp_path, monkeypatch):
+        """resolve() must chmod tmp file before rename, same as write_pending."""
+        import os
+
+        from phlegyas.file_queue import FileQueueWriter
+
+        calls = []
+        real_chmod = os.chmod
+        real_rename = os.rename
+
+        writer = FileQueueWriter(queue_dir=tmp_path, resolve_ttl=9999)
+        pending = self._make_pending()
+        writer.write_pending(pending, "test summary")
+
+        # Now track calls during resolve
+        def tracking_chmod(path, mode, *a, **kw):
+            calls.append(("chmod", str(path)))
+            return real_chmod(path, mode, *a, **kw)
+
+        def tracking_rename(src, dst, *a, **kw):
+            calls.append(("rename", str(src)))
+            return real_rename(src, dst, *a, **kw)
+
+        monkeypatch.setattr(os, "chmod", tracking_chmod)
+        monkeypatch.setattr(os, "rename", tracking_rename)
+
+        writer.resolve("test-req-001", "approved", "human:alice")
+
+        tmp_file = str(tmp_path / "test-req-001.json.tmp")
+        chmod_on_tmp = [c for c in calls if c[0] == "chmod" and c[1] == tmp_file]
+        rename_from_tmp = [c for c in calls if c[0] == "rename" and c[1] == tmp_file]
+
+        assert chmod_on_tmp, "resolve() must chmod tmp file"
+        assert rename_from_tmp, "resolve() must rename tmp file"
+        assert calls.index(chmod_on_tmp[0]) < calls.index(rename_from_tmp[0])
+
     def test_resolve_nonexistent_file_does_not_raise(self, tmp_path):
         """resolve on a missing file should log a warning but not raise."""
         from phlegyas.file_queue import FileQueueWriter
@@ -220,33 +256,60 @@ class TestFileQueueWriter:
     def test_resolve_ttl_from_env(self, tmp_path, monkeypatch):
         """Resolve TTL should be configurable via environment variable."""
         monkeypatch.setenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", "120")
-        # Need to reimport to pick up the env var at class definition time
-        import importlib
-
-        import phlegyas.file_queue
-
-        importlib.reload(phlegyas.file_queue)
-        try:
-            writer = phlegyas.file_queue.FileQueueWriter(queue_dir=tmp_path)
-            assert writer.resolve_ttl == 120
-        finally:
-            monkeypatch.delenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", raising=False)
-            importlib.reload(phlegyas.file_queue)
-
-    def test_chmod_before_rename(self, tmp_path):
-        """File should have 0o600 permissions — set before rename, not after."""
         from phlegyas.file_queue import FileQueueWriter
+
+        writer = FileQueueWriter(queue_dir=tmp_path)
+        assert writer.resolve_ttl == 120
+
+    def test_resolve_ttl_invalid_env_falls_back(self, tmp_path, monkeypatch):
+        """Invalid env var should fall back to 300, not crash."""
+        monkeypatch.setenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", "not_a_number")
+        from phlegyas.file_queue import FileQueueWriter
+
+        writer = FileQueueWriter(queue_dir=tmp_path)
+        assert writer.resolve_ttl == 300
+
+    def test_chmod_before_rename(self, tmp_path, monkeypatch):
+        """chmod must be called on tmp file before rename — verify ordering."""
+        import os
+
+        from phlegyas.file_queue import FileQueueWriter
+
+        calls = []
+        real_chmod = os.chmod
+        real_rename = os.rename
+
+        def tracking_chmod(path, mode, *args, **kwargs):
+            calls.append(("chmod", str(path), mode))
+            return real_chmod(path, mode, *args, **kwargs)
+
+        def tracking_rename(src, dst, *args, **kwargs):
+            calls.append(("rename", str(src), str(dst)))
+            return real_rename(src, dst, *args, **kwargs)
+
+        monkeypatch.setattr(os, "chmod", tracking_chmod)
+        monkeypatch.setattr(os, "rename", tracking_rename)
 
         writer = FileQueueWriter(queue_dir=tmp_path)
         pending = self._make_pending()
         writer.write_pending(pending, "test summary")
 
-        # The .tmp file should not exist (renamed away)
-        tmp_file = tmp_path / "test-req-001.json.tmp"
-        assert not tmp_file.exists()
-        # The final file should have 0o600
-        final_file = tmp_path / "test-req-001.json"
-        assert final_file.stat().st_mode & 0o777 == 0o600
+        tmp_file = str(tmp_path / "test-req-001.json.tmp")
+        final_file = str(tmp_path / "test-req-001.json")
+
+        chmod_calls = [c for c in calls if c[0] == "chmod" and c[1] == tmp_file]
+        rename_calls = [
+            c for c in calls if c[0] == "rename" and c[1] == tmp_file and c[2] == final_file
+        ]
+
+        assert chmod_calls, "Expected chmod on tmp file"
+        assert rename_calls, "Expected rename from tmp to final"
+        assert calls.index(chmod_calls[0]) < calls.index(rename_calls[0]), (
+            "chmod(tmp) must be called before rename(tmp, final)"
+        )
+
+        # Final file should have 0o600
+        assert Path(final_file).stat().st_mode & 0o777 == 0o600
 
 
 class TestFileQueueSummarizeInput:

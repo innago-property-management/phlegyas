@@ -29,11 +29,17 @@ class FileQueueWriter:
     """
 
     DEFAULT_QUEUE_DIR = Path.home() / ".claude" / "pending-approvals"
-    DEFAULT_RESOLVE_TTL = int(os.getenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", "300"))
 
     def __init__(self, queue_dir: Path | None = None, resolve_ttl: int | None = None):
         self.queue_dir = queue_dir if queue_dir is not None else self.DEFAULT_QUEUE_DIR
-        self.resolve_ttl = resolve_ttl if resolve_ttl is not None else self.DEFAULT_RESOLVE_TTL
+        if resolve_ttl is not None:
+            self.resolve_ttl = resolve_ttl
+        else:
+            try:
+                self.resolve_ttl = int(os.getenv("PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS", "300"))
+            except ValueError:
+                logger.warning("Invalid PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS, using default 300")
+                self.resolve_ttl = 300
 
     def write_pending(self, pending: Any, input_summary: str) -> Path | None:
         """
@@ -100,10 +106,11 @@ class FileQueueWriter:
             data["decided_by"] = decided_by
             data["decided_at"] = datetime.now(UTC).isoformat()
 
-            # Atomic update
+            # Atomic update: chmod tmp before rename (same as write_pending)
             tmp_path = self.queue_dir / f"{request_id}.json.tmp"
             with open(tmp_path, "w") as f:
                 json.dump(data, f, indent=2)
+            os.chmod(str(tmp_path), 0o600)
             os.rename(str(tmp_path), str(file_path))
 
             logger.info(f"Resolved approval file: {request_id} -> {resolution}")

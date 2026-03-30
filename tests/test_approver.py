@@ -452,6 +452,15 @@ class TestAuditLogSanitization:
         result = sanitize_value("curl https://admin:s3cret@db.example.com/api")
         assert "s3cret" not in result
         assert "REDACTED" in result
+        # @ must be preserved so the URL structure remains valid for debugging
+        assert "@db.example.com" in result
+
+    def test_sanitize_masks_url_credentials_with_special_username(self):
+        from phlegyas.sanitize import sanitize_value
+
+        result = sanitize_value("curl https://user.name-test:p4ssw0rd@host.com/path")
+        assert "p4ssw0rd" not in result
+        assert "REDACTED" in result
 
     def test_sanitize_masks_aws_session_token(self):
         from phlegyas.sanitize import sanitize_value

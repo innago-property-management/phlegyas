@@ -23,8 +23,8 @@ _SENSITIVE_PATTERNS = [
     # GitHub PATs
     re.compile(r"(ghp_)\S+", re.IGNORECASE),
     re.compile(r"(github_pat_)\S+", re.IGNORECASE),
-    # URL-embedded credentials (user:password@host)
-    re.compile(r"(://\w+:)\S+(@)", re.IGNORECASE),
+    # URL-embedded credentials (user:password@host) — @ preserved via lookahead
+    re.compile(r"(://[^:@]+:)\S+(?=@)", re.IGNORECASE),
 ]
 
 
