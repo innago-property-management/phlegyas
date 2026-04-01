@@ -41,17 +41,30 @@ class FileQueueWriter:
                 logger.warning("Invalid PHLEGYAS_QUEUE_RESOLVE_TTL_SECONDS, using default 300")
                 self.resolve_ttl = 300
 
-    def write_pending(self, pending: Any, input_summary: str) -> Path | None:
+    def write_pending(
+        self,
+        pending: Any,
+        input_summary: str,
+        *,
+        supervisor_id: str | None = None,
+        source: str | None = None,
+    ) -> Path | None:
         """
         Write pending approval to a JSON file atomically.
 
         Returns the path to the written file, or None on failure.
+
+        When *supervisor_id* or *source* are provided the file is written
+        with ``schema_version: 2``; otherwise it stays at version 1 for
+        backward compatibility.
         """
         try:
             self._ensure_dir()
 
+            has_v2_fields = supervisor_id is not None or source is not None
+
             data = {
-                "schema_version": 1,
+                "schema_version": 2 if has_v2_fields else 1,
                 "request_id": pending.request_id,
                 "tool_name": pending.tool_name,
                 "input_summary": input_summary,
@@ -63,6 +76,11 @@ class FileQueueWriter:
                 "expires_at": pending.expires_at.isoformat(),
                 "status": "pending",
             }
+
+            if supervisor_id is not None:
+                data["supervisor_id"] = supervisor_id
+            if source is not None:
+                data["source"] = source
 
             final_path = self.queue_dir / f"{pending.request_id}.json"
             tmp_path = self.queue_dir / f"{pending.request_id}.json.tmp"
@@ -87,6 +105,22 @@ class FileQueueWriter:
                     tmp_candidate.unlink()
             except Exception as cleanup_err:
                 logger.warning(f"Failed to clean up temp file: {cleanup_err}")
+            return None
+
+    def read_pending(self, request_id: str) -> dict | None:
+        """
+        Read a pending approval file and return its parsed contents.
+
+        Returns None if the file does not exist, contains invalid JSON,
+        or cannot be read (e.g. mid-write race).
+        """
+        try:
+            file_path = self.queue_dir / f"{request_id}.json"
+            if not file_path.exists():
+                return None
+            return json.loads(file_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            logger.warning(f"Failed to read pending approval file {request_id}: {e}")
             return None
 
     def resolve(self, request_id: str, resolution: str, decided_by: str) -> None:
