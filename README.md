@@ -337,6 +337,13 @@ Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development se
 
 See [SECURITY.md](SECURITY.md) for vulnerability reporting and known considerations around LLM-as-judge prompt injection.
 
+## Troubleshooting
+
+See [CLAUDE.md](CLAUDE.md#troubleshooting) for detailed troubleshooting, including:
+- Permission prompts still appearing in interactive sessions
+- MCP permission approver not working in print mode
+- Debugging permission decisions with the audit log
+
 ## License
 
 [MIT](LICENSE)

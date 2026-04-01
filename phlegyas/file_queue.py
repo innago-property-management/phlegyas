@@ -156,7 +156,7 @@ class FileQueueWriter:
         except Exception as e:
             logger.warning(f"Failed to resolve approval file {request_id}: {e}")
 
-    def delete_after(self, request_id: str, delay_seconds: int = 60) -> None:
+    def delete_after(self, request_id: str, delay_seconds: int = 300) -> None:
         """
         Delete the approval file after a delay (best-effort, fire-and-forget).
 
