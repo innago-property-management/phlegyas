@@ -274,6 +274,8 @@ def write_audit_log(
     tier: str,
     reason: str,
     confidence: float | None = None,
+    repo_context: str | None = None,
+    **extra_fields: Any,
 ):
     """Write decision to audit log. Sensitive values are masked."""
     if not state.enable_audit_log:
@@ -287,7 +289,25 @@ def write_audit_log(
         "tier": tier,
         "reason": reason,
         "confidence": confidence,
+        "repo_context": repo_context if repo_context is not None else os.path.basename(os.getcwd()),
     }
+
+    # Merge extra fields, but protect core audit fields from collision
+    _CORE_AUDIT_FIELDS = {
+        "timestamp",
+        "tool_name",
+        "input",
+        "tier",
+        "decision",
+        "reason",
+        "confidence",
+        "repo_context",
+    }
+    for key in extra_fields:
+        if key in _CORE_AUDIT_FIELDS:
+            logger.warning("Audit log extra_field '%s' collides with core field — dropped", key)
+        else:
+            log_entry[key] = extra_fields[key]
 
     try:
         with open(state.audit_log_file, "a", encoding="utf-8") as f:
@@ -1107,6 +1127,10 @@ async def handle_submit_approval(arguments: dict[str, Any]) -> list[TextContent]
         if reason
         else f"Human decision by {approver_id}",
         pending.confidence,
+        was_overridden=True,
+        override_decision=decision,
+        override_by=f"human:{approver_id}",
+        delegation_phase="human",
     )
 
     # Move from pending to resolved_approvals buffer
@@ -1201,6 +1225,58 @@ async def handle_poll_approval(arguments: dict[str, Any]) -> list[TextContent]:
     return [TextContent(type="text", text=json.dumps(result))]
 
 
+def _load_pending_from_file(request_id: str, file_queue: FileQueueWriter) -> PendingApproval | None:
+    """
+    Load a PendingApproval from the file queue.
+
+    Used as a fallback when the pending approval is not in memory
+    (e.g. hook-originated approvals that were written directly to the
+    file queue without going through the MCP server).
+
+    Returns None if file not found or missing required fields.
+    Sets confidence to 0.5 when the file has confidence=None (hook-originated).
+    """
+    data = file_queue.read_pending(request_id)
+    if data is None:
+        return None
+
+    # Require minimum fields
+    rid = data.get("request_id")
+    tool_name = data.get("tool_name")
+    if not rid or not tool_name:
+        logger.warning(f"File for {request_id} missing required fields (request_id, tool_name)")
+        return None
+
+    # Hook-originated files may have confidence=None; default to 0.5
+    confidence = data.get("confidence")
+    if confidence is None:
+        confidence = 0.5
+
+    # Parse timestamps with fallback
+    created_at = datetime.now(UTC)
+    expires_at = None
+    try:
+        if data.get("created_at"):
+            created_at = datetime.fromisoformat(data["created_at"])
+        if data.get("expires_at"):
+            expires_at = datetime.fromisoformat(data["expires_at"])
+    except (ValueError, TypeError):
+        pass  # Use defaults
+
+    return PendingApproval(
+        request_id=rid,
+        tool_name=tool_name,
+        input_data=data.get("input_data") or {"summary": data.get("input_summary", "")},
+        reason=data.get("reason", ""),
+        confidence=confidence,
+        tier=data.get("tier", "tier3_needs_human"),
+        workflow_id=data.get("workflow_id"),
+        agent_id=data.get("agent_id"),
+        created_at=created_at,
+        expires_at=expires_at,
+    )
+
+
 async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextContent]:
     """
     Handle supervisor_approve tool call.
@@ -1219,7 +1295,17 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
     cleanup_expired_pending()
 
     # Look up request_id in pending_approvals (NOT resolved_approvals)
-    if request_id not in state.pending_approvals:
+    pending = state.pending_approvals.get(request_id)
+    loaded_from_file = False
+
+    # Fallback: check file queue for hook-originated approvals
+    if pending is None and state.file_queue:
+        pending = _load_pending_from_file(request_id, state.file_queue)
+        if pending is not None:
+            loaded_from_file = True
+            logger.info(f"Loaded pending approval {request_id} from file queue (hook-originated)")
+
+    if pending is None:
         result = {
             "success": False,
             "error": "not_found",
@@ -1227,8 +1313,6 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
             "It may have expired, already been resolved, or never existed.",
         }
         return [TextContent(type="text", text=json.dumps(result))]
-
-    pending = state.pending_approvals[request_id]
 
     # Check if expired (belt-and-suspenders, matches handle_submit_approval)
     if pending.is_expired():
@@ -1268,6 +1352,10 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
             "tier3_supervisor_escalated",
             audit_reason,
             pending.confidence,
+            was_overridden=True,
+            override_decision=decision,
+            override_by=f"supervisor:{supervisor_id}",
+            delegation_phase="supervisor",
         )
 
         result = {
@@ -1289,8 +1377,9 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
     pending.resolution = decision  # "approve" or "deny"
     pending.status = "approved" if decision == "approve" else "denied"
 
-    # Move from pending to resolved
-    state.pending_approvals.pop(request_id)
+    # Move from pending to resolved (skip pop if loaded from file — not in memory)
+    if not loaded_from_file:
+        state.pending_approvals.pop(request_id, None)
     state.resolved_approvals[request_id] = pending
 
     # Update file queue
@@ -1305,6 +1394,10 @@ async def handle_supervisor_approve(arguments: dict[str, Any]) -> list[TextConte
         tier_label,
         audit_reason,
         pending.confidence,
+        was_overridden=True,
+        override_decision=decision,
+        override_by=f"supervisor:{supervisor_id}",
+        delegation_phase="supervisor",
     )
 
     logger.info(

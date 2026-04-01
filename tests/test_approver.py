@@ -13,7 +13,15 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from phlegyas.approver_mcp import state, write_audit_log
+from phlegyas.approver_mcp import (
+    PendingApproval,
+    handle_submit_approval,
+    handle_supervisor_approve,
+    pending_approvals,
+    resolved_approvals,
+    state,
+    write_audit_log,
+)
 from phlegyas.tier1_dangerous import DangerousPatternDetector
 from phlegyas.tier2_safe import SafeOperationDetector
 from phlegyas.tier3_ai import AIEvaluator
@@ -468,3 +476,184 @@ class TestAuditLogSanitization:
         result = sanitize_value("AWS_SESSION_TOKEN=FwoGZXIvYXdzE...")
         assert "FwoGZXIvYXdzE" not in result
         assert "REDACTED" in result
+
+
+class TestEnhancedAuditFields:
+    """Tests for Phase 0 enhanced audit logging fields."""
+
+    @pytest.fixture(autouse=True)
+    def _clear_approval_stores(self):
+        """Clear pending and resolved approval stores before each test."""
+        pending_approvals.clear()
+        resolved_approvals.clear()
+        yield
+        pending_approvals.clear()
+        resolved_approvals.clear()
+
+    @staticmethod
+    def _make_pending(
+        request_id="test-req-001",
+        tool_name="Bash",
+        input_data=None,
+        confidence=0.65,
+        tier="tier3_needs_human",
+        workflow_id="wf-001",
+        agent_id="agent-001",
+    ) -> PendingApproval:
+        pending = PendingApproval(
+            request_id=request_id,
+            tool_name=tool_name,
+            input_data=input_data or {"command": "npm install some-package"},
+            reason="Needs review",
+            confidence=confidence,
+            tier=tier,
+            workflow_id=workflow_id,
+            agent_id=agent_id,
+        )
+        pending_approvals[request_id] = pending
+        return pending
+
+    def test_audit_log_includes_repo_context(self, tmp_path):
+        """write_audit_log should include a repo_context field."""
+        audit_file = tmp_path / "audit.jsonl"
+
+        with (
+            patch.object(state, "audit_log_file", str(audit_file)),
+            patch.object(state, "enable_audit_log", True),
+        ):
+            write_audit_log(
+                tool_name="Bash",
+                input_data={"command": "ls"},
+                decision="allow",
+                tier="tier2_safe",
+                reason="safe",
+                repo_context="my-project",
+            )
+
+        entry = json.loads(audit_file.read_text().strip())
+        assert entry["repo_context"] == "my-project"
+
+    def test_audit_log_repo_context_defaults_to_cwd_basename(self, tmp_path):
+        """When repo_context is not provided, it should default to os.getcwd() basename."""
+        audit_file = tmp_path / "audit.jsonl"
+
+        with (
+            patch.object(state, "audit_log_file", str(audit_file)),
+            patch.object(state, "enable_audit_log", True),
+            patch("phlegyas.approver_mcp.os.getcwd", return_value="/home/user/my-repo"),
+            patch("phlegyas.approver_mcp.os.path.basename", return_value="my-repo"),
+        ):
+            write_audit_log(
+                tool_name="Bash",
+                input_data={"command": "ls"},
+                decision="allow",
+                tier="tier2_safe",
+                reason="safe",
+            )
+
+        entry = json.loads(audit_file.read_text().strip())
+        assert entry["repo_context"] == "my-repo"
+
+    def test_audit_log_warns_on_core_field_collision(self, tmp_path):
+        """Extra fields colliding with core audit fields should be dropped with a warning."""
+        audit_file = tmp_path / "audit.jsonl"
+
+        with (
+            patch.object(state, "audit_log_file", str(audit_file)),
+            patch.object(state, "enable_audit_log", True),
+        ):
+            # Use non-overlapping keyword names to avoid Python TypeError,
+            # but test fields that collide with log_entry keys built inside the function
+            write_audit_log(
+                tool_name="Bash",
+                input_data={"command": "ls"},
+                decision="allow",
+                tier="tier2_safe",
+                reason="safe",
+                # These collide with core log_entry keys (timestamp, tool_name, etc.)
+                timestamp="2000-01-01T00:00:00Z",
+                tool_name_override="should_not_appear",  # not a core field — passes
+                legit_field="ok",
+            )
+
+        entry = json.loads(audit_file.read_text().strip())
+        # Core "timestamp" field must not be overwritten
+        assert entry["timestamp"] != "2000-01-01T00:00:00Z"
+        # Non-colliding extra fields should still be present
+        assert entry["legit_field"] == "ok"
+
+    def test_audit_log_extra_fields_merged(self, tmp_path):
+        """Extra keyword arguments should be merged into the audit entry."""
+        audit_file = tmp_path / "audit.jsonl"
+
+        with (
+            patch.object(state, "audit_log_file", str(audit_file)),
+            patch.object(state, "enable_audit_log", True),
+        ):
+            write_audit_log(
+                tool_name="Bash",
+                input_data={"command": "ls"},
+                decision="allow",
+                tier="tier2_safe",
+                reason="safe",
+                delegation_phase="direct",
+                custom_field="hello",
+            )
+
+        entry = json.loads(audit_file.read_text().strip())
+        assert entry["delegation_phase"] == "direct"
+        assert entry["custom_field"] == "hello"
+
+    @pytest.mark.asyncio
+    async def test_audit_log_submit_approval_records_override(self, tmp_path):
+        """handle_submit_approval should write override fields to audit log."""
+        audit_file = tmp_path / "audit.jsonl"
+        self._make_pending(request_id="req-sub-001")
+
+        with (
+            patch.object(state, "audit_log_file", str(audit_file)),
+            patch.object(state, "enable_audit_log", True),
+            patch.object(state, "file_queue", None),
+        ):
+            await handle_submit_approval(
+                {
+                    "request_id": "req-sub-001",
+                    "decision": "approve",
+                    "reason": "looks safe",
+                    "approver_id": "alice",
+                }
+            )
+
+        entry = json.loads(audit_file.read_text().strip())
+        assert entry["was_overridden"] is True
+        assert entry["override_decision"] == "approve"
+        assert entry["override_by"] == "human:alice"
+        assert entry["delegation_phase"] == "human"
+
+    @pytest.mark.asyncio
+    async def test_audit_log_supervisor_approve_records_override(self, tmp_path):
+        """handle_supervisor_approve should write override fields to audit log."""
+        audit_file = tmp_path / "audit.jsonl"
+        self._make_pending(request_id="req-sup-001", workflow_id="wf-001")
+
+        with (
+            patch.object(state, "audit_log_file", str(audit_file)),
+            patch.object(state, "enable_audit_log", True),
+            patch.object(state, "file_queue", None),
+            patch.object(state.supervisor_policy, "validate", return_value=None),
+        ):
+            await handle_supervisor_approve(
+                {
+                    "request_id": "req-sup-001",
+                    "decision": "approve",
+                    "supervisor_id": "cygnus-001",
+                    "workflow_id": "wf-001",
+                    "reasoning": "Aligns with task",
+                }
+            )
+
+        entry = json.loads(audit_file.read_text().strip())
+        assert entry["was_overridden"] is True
+        assert entry["override_decision"] == "approve"
+        assert entry["override_by"] == "supervisor:cygnus-001"
+        assert entry["delegation_phase"] == "supervisor"
