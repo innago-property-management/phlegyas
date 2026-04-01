@@ -1,7 +1,7 @@
 # Phlegyas
 
 <div align="center">
-  <img src="docs/images/phlegyas-hero.jpg" alt="Phlegyas ferrying Dante and Virgil across the Styx — 19th century stained glass, Museo Poldi Pezzoli, Milan" width="400">
+  <img src="docs/images/phlegyas-hero.jpg" alt="Phlegyas ferrying Dante and Virgil across the Styx -- 19th century stained glass, Museo Poldi Pezzoli, Milan" width="400">
   <br>
   <em>Phlegyas ferrying Dante and Virgil across the Styx</em>
   <br>
@@ -9,263 +9,83 @@
 </div>
 
 [![CI](https://github.com/innago-property-management/phlegyas/actions/workflows/ci.yml/badge.svg)](https://github.com/innago-property-management/phlegyas/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/phlegyas.svg)](https://pypi.org/project/phlegyas/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-*The ferryman at the gate — three-tier intelligent permission gate for AI agents.*
+**Automated approval system for AI agents** -- a 3.5-level permission gate that lets agents use tools safely while keeping humans in control.
 
-## Overview
+> *Named for the ferryman of the Styx in Dante's Inferno -- the gatekeeper who decides who crosses.*
 
-When running Claude Code with long-running tasks or multi-agent workflows, you need a way to approve operations autonomously while maintaining security. This MCP server provides intelligent permission approval that:
+## Why
 
-- **Blocks dangerous operations** instantly (Tier 1)
-- **Auto-approves safe operations** instantly (Tier 2)
-- **Trusts human-approved scripts** via content hashing (Tier 2.5)
-- **Uses Claude AI** to evaluate ambiguous cases (Tier 3)
-- **Escalates to humans** for high-risk operations (optional Slack integration)
+AI agents need to run tools -- read files, execute commands, make API calls. But unrestricted tool access is dangerous, and requiring human approval for every action makes agents useless.
 
-## Why Use This?
+Phlegyas solves this with a layered permission model:
 
-### Problem
+- **95% of operations auto-approve in <1ms** -- safe, known patterns need zero human input
+- **Dangerous operations are blocked instantly** -- `rm -rf`, `DROP TABLE`, force-push to main
+- **New scripts earn trust progressively** -- first use needs approval, then the content hash is stored so identical future calls auto-approve
+- **Grey areas get AI evaluation** -- an LLM judge assesses ambiguous requests against project context
+- **Truly risky operations reach a human** -- via Slack, macOS notification, or file queue
+- **Every decision is audited** -- full JSONL ledger of what was approved, denied, and why
 
-Claude Code's Task agents spawn separate processes that don't inherit parent session permissions. This causes:
-- Permission prompts blocking autonomous execution
-- Manual approval required for every web fetch, file write, etc.
-- Inability to work remotely (away from MacBook)
+Phlegyas works as a Claude Code [pre-tool-use hook](https://docs.anthropic.com/en/docs/claude-code/hooks) (fast, local guardrail) or as an MCP server (full feature set including AI evaluation and Slack escalation).
 
-### Solution
+## The 3.5-Level Model
 
-This permission-prompt-tool MCP server acts as a centralized approval system that:
--  **Autonomous**: 95% of operations approved instantly without human input
--  **Intelligent**: Claude AI evaluates ambiguous cases with project context
--  **Secure**: Dangerous operations (rm -rf, DROP TABLE, production changes) always blocked
--  **Remote-friendly**: Optional Slack integration for phone-based approval
--  **Auditable**: Full JSONL audit log of all decisions
+| Level | Name | What happens | Speed | Cost |
+|-------|------|-------------|-------|------|
+| **1** | Dangerous patterns | Instant deny via regex -- destructive ops, production targets, credential exposure | <1ms | $0 |
+| **2** | Safe patterns | Instant allow via regex -- read-only tools, test runners, linters, builds | <1ms | $0 |
+| **2.5** | Hash-based trust (TOFU) | First call to a new script needs approval; SHA-256 hash stored so future identical calls auto-approve | <1ms | $0 |
+| **3** | AI evaluation | Claude (Haiku by default) judges ambiguous cases against project context and confidence thresholds | 200-500ms | ~$0.001 |
+| **3+** | Human escalation | When AI confidence is low, the decision is parked for a human via Slack, macOS notification, or file queue | async | $0 |
+
+The levels are evaluated in order: dangerous check first (nothing can bypass it), then safe patterns, then trust store, then AI, then human. This means a trusted script that suddenly contains `rm -rf /` will still be blocked by Level 1.
+
+### Hash-Based Trust: The Clever Bit
+
+Most approval systems are all-or-nothing: either a tool is on the allow-list, or it isn't. Phlegyas adds a middle ground inspired by SSH's "Trust On First Use" (TOFU) model:
+
+1. An agent tries to run `scripts/deploy-staging.sh` for the first time
+2. Phlegyas doesn't recognize it -- falls through to AI evaluation or human approval
+3. The human approves it (or the AI does, with high confidence)
+4. Phlegyas computes a SHA-256 hash of the script's contents and stores it
+5. Next time the agent runs the same script, the hash matches -- instant auto-approve
+6. If someone modifies the script, the hash changes -- back to evaluation
+
+This makes agents genuinely useful with custom tooling. The first call to any new script or tool needs a one-time approval, but after that it's trusted as long as the content hasn't changed. You get the safety of explicit approval with the speed of an allow-list.
+
+```bash
+# Trust a script (one-time)
+phlegyas-trust /path/to/script.sh --note "Staging deploy script"
+
+# Or let the approval flow handle it automatically -- approve once, trusted forever
+# (until the script changes)
+
+# Management commands
+phlegyas-trust --list                       # See all trusted scripts
+phlegyas-trust --verify                     # Check all hashes still match
+phlegyas-trust --revoke /path/to/script.sh  # Remove trust
+```
 
 ## Quick Start
 
-### 1. Installation
-
-**Option A: pip install (coming soon)**
+### Install
 
 ```bash
 pip install phlegyas
 ```
 
-> **Note:** Install with Slack support using `pip install phlegyas[slack]`
+> Install with Slack support: `pip install phlegyas[slack]`
 
-**Option B: Install from source**
+### Option A: Pre-Tool-Use Hook (Recommended)
 
-```bash
-# Clone the repository
-git clone https://github.com/innago-property-management/phlegyas.git
-cd phlegyas
+The simplest setup -- a Claude Code hook that evaluates every tool call through Levels 1 and 2:
 
-# Create virtual environment
-python3 -m venv .venv
-source .venv/bin/activate  # On Windows: .venv\Scripts\activate
+1. Create `~/.claude/hooks/phlegyas-guardrail.py`:
 
-# Install dependencies
-pip install -e .
-```
-
-### 2. Configuration
-
-```bash
-# Copy example environment file
-cp .env.example .env
-
-# Edit .env with your settings
-nano .env
-```
-
-**Required:**
-```bash
-ANTHROPIC_API_KEY=sk-ant-your-key-here
-```
-
-**Optional (with defaults):**
-```bash
-CLAUDE_MODEL=claude-haiku-4-5-20251001
-APPROVAL_CONFIDENCE_THRESHOLD=0.8
-LOG_LEVEL=INFO
-ENABLE_AUDIT_LOG=true
-```
-
-### 3. MCP Server Configuration
-
-Add to your `~/.claude/mcp-servers.json`:
-
-```json
-{
-  "mcpServers": {
-    "phlegyas": {
-      "command": "python",
-      "args": ["/path/to/phlegyas/phlegyas/approver_mcp.py"],
-      "env": {
-        "ANTHROPIC_API_KEY": "sk-ant-your-key-here",
-        "PROJECT_NAME": "Your Project Name",
-        "PROJECT_TYPE": "C# microservices",
-        "CURRENT_TASK": "Auth0 migration"
-      }
-    }
-  }
-}
-```
-
-### 4. Run Claude Code with Permission Tool
-
-```bash
-claude --permission-prompt-tool mcp__phlegyas__permissions__approve \
-  -p "Refactor the authentication service to use Auth0"
-```
-
-## Three-Tier Evaluation System
-
-### Tier 1: Dangerous Patterns (Always Block)
-
-Instant denial for known-dangerous operations:
-
-- **Destructive:** `rm -rf`, `DROP TABLE`, `DELETE FROM`, `TRUNCATE`, `format C:`
-- **Production:** `production`, `prod-db`, `--env=prod`
-- **Git:** `git push --force`, `git reset --hard`, `git push origin main`
-- **Credentials:** `password=`, `API_KEY`, `AWS_SECRET`
-
-**Response time:** <1ms
-**Cost:** $0
-
-### Tier 2: Safe Categories (Always Approve)
-
-Instant approval for known-safe operations:
-
-**Read-only tools:**
-- `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`
-- All Firecrawl tools (`search`, `scrape`, `map`, `extract`)
-- JetBrains tools (find, search, list)
-
-**Safe bash commands:**
-- Git: `status`, `log`, `diff`, `checkout -b feature/*`
-- Tests: `npm test`, `dotnet test`, `pytest`, `cargo test`
-- Linting: `eslint`, `dotnet format`, `black`, `prettier`
-- Builds: `npm build`, `dotnet build`, `cargo build`
-- Info: `ls`, `cat`, `grep`, `ps`, `env`
-- Install: `npm install`, `pip install`, `dotnet restore`
-
-**Safe file operations:**
-- Writes to: `/tmp/`, `docs/research/`, `tests/`, `scripts/`
-- Edits to: project files (excluding `.env`, `secrets`, `credentials`)
-
-**Response time:** <1ms
-**Cost:** $0
-
-### Tier 2.5: Script Trust Store (TOFU)
-
-Auto-approval for human-trusted scripts via content hashing:
-
-- Human trusts a script once with `phlegyas-trust /path/to/script.sh`
-- SHA-256 hash of file contents stored in `~/.claude/trusted-scripts.json`
-- On execution: hash verified → match = auto-approve, mismatch = Tier 3
-- Tier 1 dangerous patterns still checked first (trust cannot bypass)
-- Changes logged to `~/.claude/trusted-scripts.log`
-
-```bash
-# Trust a script
-phlegyas-trust /path/to/script.sh --note "Morning schedule"
-
-# List, revoke, or verify
-phlegyas-trust --list
-phlegyas-trust --revoke /path/to/script.sh
-phlegyas-trust --verify
-```
-
-**Response time:** <1ms (file hash comparison)
-**Cost:** $0
-
-### Tier 3: AI Evaluation (Ambiguous Cases)
-
-Claude AI evaluates based on project context:
-
-**Evaluation criteria:**
-- Is operation aligned with current task?
-- Is risk minimal or well-contained?
-- Is operation reversible?
-- Is it clearly dangerous or unrelated?
-
-**AI Decision:**
-- `approve` - Safe and aligned (confidence >= 80%)
-- `deny` - Dangerous or out of scope
-- `ask_user` - Needs human judgment (confidence < 80%)
-
-**Response time:** 200-500ms
-**Cost:** ~$0.001 per evaluation (Haiku)
-
-## Usage Examples
-
-### Example 1: Research Task with WebFetch
-
-```bash
-# Task agent needs to fetch web content
-Tool: WebFetch
-Input: {"url": "https://anthropic.com/prompt-caching"}
-
-# Result: APPROVED (Tier 2 - safe category)
-# Reason: "Auto-approved: read-only tool: WebFetch"
-```
-
-### Example 2: Git Branch Creation
-
-```bash
-# Agent wants to create feature branch
-Tool: Bash
-Input: {"command": "git checkout -b feature/auth0-setup"}
-
-# Result: APPROVED (Tier 2 - safe category)
-# Reason: "Auto-approved: safe git operation"
-```
-
-### Example 3: Dangerous Operation
-
-```bash
-# Agent attempts dangerous command
-Tool: Bash
-Input: {"command": "rm -rf /tmp/cache"}
-
-# Result: DENIED (Tier 1 - dangerous pattern)
-# Reason: "Blocked: Destructive operation detected - rm\s+-rf"
-```
-
-### Example 4: Ambiguous Write Operation
-
-```bash
-# Agent wants to write to unusual location
-Tool: Write
-Input: {"file_path": "/etc/app/config.yaml", "content": "..."}
-
-# Result: AI EVALUATION (Tier 3)
-# Decision: "ask_user" (confidence: 0.65)
-# Reason: "Write to system directory requires explicit approval"
-# Final: DENIED (pending human approval)
-```
-
-## Claude Code Hooks (PreToolUse Guardrail)
-
-Phlegyas can run as a Claude Code PreToolUse hook, providing a fast safety net for autonomous agents without MCP server overhead. This is ideal for supervised agent workflows (e.g., Cygnus/ACP) running with `bypassPermissions`.
-
-### How It Works
-
-The hook evaluates every tool call through Tier 1 and Tier 2:
-- **Tier 1 dangerous** → blocks the tool call (returns error)
-- **Tier 2 safe** → passes silently (tool proceeds)
-- **Ambiguous** → passes through (Tier 3 AI not evaluated)
-
-### Setup
-
-1. Install phlegyas:
-```bash
-pip install phlegyas
-```
-
-2. Create the hook script at `~/.claude/hooks/phlegyas-guardrail.py`:
 ```python
 #!/usr/bin/env python3
 import json, sys
@@ -298,13 +118,14 @@ def main():
     if is_safe:
         return  # Pass through
 
-    # Ambiguous: pass through (Tier 3 AI not invoked for speed)
+    # Ambiguous: pass through (Level 3 AI not invoked for speed)
 
 if __name__ == "__main__":
     main()
 ```
 
-3. Wire into `~/.claude/settings.json`:
+2. Wire into `~/.claude/settings.json`:
+
 ```json
 {
   "hooks": {
@@ -322,34 +143,88 @@ if __name__ == "__main__":
 }
 ```
 
+### Option B: MCP Server (Full Feature Set)
+
+For AI evaluation (Level 3), hash-based trust (Level 2.5), and Slack escalation:
+
+1. Set your API key:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-your-key-here
+```
+
+2. Add to `~/.claude/mcp-servers.json`:
+
+```json
+{
+  "mcpServers": {
+    "phlegyas": {
+      "command": "python",
+      "args": ["-m", "phlegyas"],
+      "env": {
+        "ANTHROPIC_API_KEY": "sk-ant-your-key-here",
+        "PROJECT_NAME": "Your Project Name",
+        "PROJECT_TYPE": "Python web service",
+        "CURRENT_TASK": "Building auth module"
+      }
+    }
+  }
+}
+```
+
+3. Run Claude Code with the permission tool:
+
+```bash
+claude --permission-prompt-tool mcp__phlegyas__permissions__approve \
+  -p "Refactor the authentication service"
+```
+
 ### Hook vs MCP Server
 
 | Feature | Hook (PreToolUse) | MCP Server |
 |---------|-------------------|------------|
-| Tier 1 + 2 | Yes | Yes |
-| Tier 2.5 (TOFU) | No | Yes |
-| Tier 3 (AI eval) | No | Yes |
-| Slack escalation | — | Block + wait |
-| Latency | <10ms | 200-500ms (Tier 3) |
-| Best for | Supervised agents | Print mode (`-p`) |
+| Level 1 (dangerous) + Level 2 (safe) | Yes | Yes |
+| Level 2.5 (hash-based trust) | No | Yes |
+| Level 3 (AI evaluation) | No | Yes |
+| Slack escalation | No | Yes |
+| Latency | <10ms | <1ms (Level 1/2), 200-500ms (Level 3) |
+| Best for | Supervised agents, fast guardrail | Print mode (`-p`), full autonomy |
 
-## MCP Tools
+## What Gets Blocked, What Gets Through
 
-The server exposes seven tools:
+### Level 1: Always Blocked
 
-| Tool | Purpose |
-|------|---------|
-| `permissions__approve` | Main permission gate — returns `allow`/`deny` for Claude Code's `--permission-prompt-tool` flag |
-| `validate_operation` | Pre-flight check for Task agents — returns `approved`/`denied`/`pending` with request IDs |
-| `poll_approval` | Agent-oriented polling — check resolution status of a pending `request_id` |
-| `submit_approval` | Human decision submission for pending approvals (approve or deny by `request_id`) |
-| `supervisor_approve` | Supervisor agent delegation — approve/deny/escalate within workflow policy constraints |
-| `get_pending_approvals` | List pending approvals awaiting human decision (filterable by `workflow_id`/`agent_id`) |
-| `get_approval_stats` | Audit log statistics (totals, by-tier, by-tool breakdowns) |
+- **Destructive:** `rm -rf`, `DROP TABLE`, `DELETE FROM`, `TRUNCATE`, `format C:`
+- **Production:** `production`, `prod-db`, `--env=prod`
+- **Git:** `git push --force`, `git reset --hard`, `git push origin main`
+- **Credentials:** `password=`, `API_KEY`, `AWS_SECRET`
 
-## Audit Logging
+### Level 2: Always Approved
 
-All decisions are logged to `audit.jsonl` in JSONL format:
+**Read-only tools:** `Read`, `Glob`, `Grep`, `WebFetch`, `WebSearch`, Firecrawl tools, JetBrains tools
+
+**Safe bash commands:**
+- Git: `status`, `log`, `diff`, `checkout -b feature/*`
+- Tests: `npm test`, `dotnet test`, `pytest`, `cargo test`
+- Linting: `eslint`, `dotnet format`, `black`, `prettier`
+- Builds: `npm build`, `dotnet build`, `cargo build`
+- Info: `ls`, `cat`, `grep`, `ps`, `env`
+- Install: `npm install`, `pip install`, `dotnet restore`
+
+**Safe file operations:** writes to `/tmp/`, `docs/research/`, `tests/`, `scripts/`; edits to project files (excluding `.env`, `secrets`, `credentials`)
+
+### Level 3: AI Evaluates
+
+Everything else goes to Claude AI (Haiku by default), which evaluates:
+- Is the operation aligned with the current task?
+- Is the risk minimal or well-contained?
+- Is the operation reversible?
+
+The AI returns `approve` (confidence >= 80%), `deny`, or `ask_user` (confidence too low -- escalate to human).
+
+## Audit Ledger
+
+Every decision is logged to `audit.jsonl`:
 
 ```json
 {
@@ -363,34 +238,66 @@ All decisions are logged to `audit.jsonl` in JSONL format:
 }
 ```
 
-**View statistics:**
-
-Use the `get_approval_stats` MCP tool, or query the audit log directly:
+Query with the `get_approval_stats` MCP tool or directly:
 
 ```bash
 cat audit.jsonl | jq '.'
 ```
 
-Output:
-```json
-{
-  "total": 247,
-  "approved": 235,
-  "denied": 12,
-  "by_tier": {
-    "tier1_dangerous": 3,
-    "tier2_safe": 230,
-    "tier3_ai_approve": 5,
-    "tier3_ai_deny": 7,
-    "tier3_needs_human": 2
-  },
-  "by_tool": {
-    "Bash": 145,
-    "Read": 62,
-    "WebFetch": 28,
-    "Write": 12
-  }
-}
+In a typical 8-hour coding session, expect ~250 requests: 95% auto-approved (Level 2), 2% blocked (Level 1), 4% AI-evaluated (Level 3). Total cost: ~$0.01.
+
+## MCP Tools
+
+The server exposes seven tools:
+
+| Tool | Purpose |
+|------|---------|
+| `permissions__approve` | Main permission gate -- returns `allow`/`deny` for Claude Code's `--permission-prompt-tool` flag |
+| `validate_operation` | Pre-flight check for Task agents -- returns `approved`/`denied`/`pending` with request IDs |
+| `poll_approval` | Agent-oriented polling -- check resolution status of a pending `request_id` |
+| `submit_approval` | Human decision submission for pending approvals (approve or deny by `request_id`) |
+| `supervisor_approve` | Supervisor agent delegation -- approve/deny/escalate within workflow policy constraints |
+| `get_pending_approvals` | List pending approvals awaiting human decision (filterable by `workflow_id`/`agent_id`) |
+| `get_approval_stats` | Audit log statistics (totals, by-tier, by-tool breakdowns) |
+
+## Slack Integration
+
+When Level 3 returns `ask_user` and Slack is configured, phlegyas escalates the decision to a human via interactive Slack messages with Approve/Deny buttons.
+
+```bash
+pip install phlegyas[slack]
+```
+
+```bash
+SLACK_BOT_TOKEN=xoxb-your-bot-token
+SLACK_APP_TOKEN=xapp-your-app-token
+SLACK_APPROVAL_CHANNEL=approvals
+```
+
+Auto-denies after 300 seconds (configurable via `SLACK_APPROVAL_TIMEOUT_SECONDS`). See `examples/SLACK_SETUP.md` for full setup guide.
+
+## Architecture
+
+```
+Claude Code Tool Call
+        |
+        v
+Level 1: Dangerous? --> YES --> DENY (instant)
+        |
+        v NO
+Level 2: Safe pattern? --> YES --> ALLOW (instant)
+        |
+        v NO
+Level 2.5: Trusted script? --> YES (hash matches) --> ALLOW (instant)
+        |
+        v NO
+Level 3: AI evaluation
+        |
+        +--> approve (>= 80% confidence) --> ALLOW
+        |
+        +--> deny --> DENY
+        |
+        +--> ask_user --> Slack / macOS notification / file queue --> Human decides
 ```
 
 ## Configuration Reference
@@ -399,8 +306,8 @@ Output:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `ANTHROPIC_API_KEY` | **Required** | Your Anthropic API key |
-| `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | Model for AI evaluation (haiku/sonnet) |
+| `ANTHROPIC_API_KEY` | **Required** | Your Anthropic API key (only needed for Level 3) |
+| `CLAUDE_MODEL` | `claude-haiku-4-5-20251001` | Model for AI evaluation |
 | `APPROVAL_CONFIDENCE_THRESHOLD` | `0.8` | Min confidence for auto-approval (0.0-1.0) |
 | `DENIAL_CONFIDENCE_THRESHOLD` | `0.2` | Max confidence for auto-denial (0.0-1.0) |
 | `LOG_LEVEL` | `INFO` | Logging level (DEBUG/INFO/WARNING/ERROR) |
@@ -409,194 +316,35 @@ Output:
 | `PROJECT_NAME` | `Unknown` | Your project name (improves AI context) |
 | `PROJECT_TYPE` | `Software project` | Project type (e.g., "C# microservices") |
 | `CURRENT_TASK` | `Development work` | Current task description |
-| `CACHE_TTL_SECONDS` | `3600` | TTL for Tier 3 decision cache (seconds) |
-| `ENABLE_APPROVAL_CACHE` | `true` | Enable caching of Tier 3 decisions |
-| `PENDING_TTL_SECONDS` | `1800` | TTL for pending human approvals (seconds) |
-
-### Model Selection
-
-**Haiku (Recommended):**
-- Cost: ~$0.001 per evaluation
-- Speed: 200-400ms
-- Use for: Most operations
-
-**Sonnet (Advanced):**
-- Cost: ~$0.015 per evaluation
-- Speed: 500-1000ms
-- Use for: Complex operations requiring deeper reasoning
+| `CACHE_TTL_SECONDS` | `3600` | TTL for Level 3 decision cache |
+| `ENABLE_APPROVAL_CACHE` | `true` | Enable caching of Level 3 decisions |
+| `PENDING_TTL_SECONDS` | `1800` | TTL for pending human approvals |
 
 ## Testing
 
 ```bash
-# Install dev dependencies
 pip install -e ".[dev]"
-
-# Run all tests
 pytest tests/ -v
-
-# Run specific tier tests
-pytest tests/test_tier1_dangerous.py -v
-pytest tests/test_tier2_safe.py -v
-pytest tests/test_tier3_ai.py -v
-
-# Run with coverage
-pytest tests/ --cov=phlegyas --cov-report=html
 ```
 
-**Test suite: 575 tests (100% passing)**
-- Tier 1: 107 tests (dangerous patterns)
-- Tier 2: 89 tests (safe operations)
-- Tier 2 custom: 23 tests (user-configurable safe patterns)
-- Tier 2.5: 38 tests (script trust store)
-- Tier 3: 34 tests (AI evaluation)
-- Prompt injection: 52 tests (injection hardening)
-- Validate Operation: 24 tests (Task agent workflow)
-- Integration: 26 tests (end-to-end + approver)
-- Poll Approval: 22 tests (agent polling)
-- File Queue: 36 tests (file queue + macOS notifier)
-- Supervisor Approve: 30 tests (supervisor delegation tool)
-- Supervisor Policy: 17 tests (supervisor policy)
-- Slack: 35 tests (approval service, message building, concurrency)
-
-## Performance & Cost
-
-### Typical 8-Hour Coding Session
-
-| Tier | Requests | % of Total | Avg Time | Total Cost |
-|------|----------|------------|----------|------------|
-| Tier 1 (Dangerous) | 5 | 2% | <1ms | $0 |
-| Tier 2 (Safe) | 235 | 95% | <1ms | $0 |
-| Tier 3 (AI) | 10 | 4% | 300ms | $0.01 |
-| **Total** | **250** | **100%** | **~12ms avg** | **$0.01** |
-
-**Key Metrics:**
-- **95%+ auto-approved** - No human intervention needed
-- **<20ms avg latency** - Minimal impact on agent speed
-- **<$0.02/day** - Extremely cost-effective
-
-## Slack Integration
-
-When Tier 3 returns `ask_user` and Slack is configured, phlegyas escalates the decision to a human via interactive Slack messages with Approve/Deny buttons.
-
-### Setup
-
-```bash
-pip install phlegyas[slack]
-```
-
-Set three environment variables:
-```bash
-SLACK_BOT_TOKEN=xoxb-your-bot-token
-SLACK_APP_TOKEN=xapp-your-app-token
-SLACK_APPROVAL_CHANNEL=approvals
-```
-
-See `examples/SLACK_SETUP.md` for full Slack App creation and configuration guide.
-
-### Behavior by Integration Mode
-
-| Mode | Slack behavior |
-|------|---------------|
-| MCP: `permissions__approve` | Blocks, waits for button click, returns `allow`/`deny` |
-| MCP: `validate_operation` | Fire-and-forget notification, returns `pending` with `request_id` |
-| Hook: PreToolUse | Not applicable (hook does not include Slack code) |
-
-### Timeout
-
-Auto-denies after 300 seconds (configurable via `SLACK_APPROVAL_TIMEOUT_SECONDS` env var or `timeout_seconds` parameter).
-
-### Audit Log Labels
-
-- `tier3_slack_approved` — Human clicked Approve
-- `tier3_slack_denied` — Human clicked Deny or timed out
-
-## Architecture
-
-```
-Claude Code Permission Request
-        |
-        v
-Is it dangerous? --> YES --> Deny immediately (Tier 1)
-        |
-        v NO
-Is it safe? --> YES --> Approve immediately (Tier 2)
-        |
-        v NO
-Is it a trusted script? --> YES (hash matches) --> Approve (Tier 2.5)
-        |
-        v NO / hash mismatch
-Ask Claude AI to evaluate (Tier 3)
-        |
-        v
-AI says "approve"? --> Approve with reasoning
-        |
-        v
-AI says "deny"? --> Deny with reasoning
-        |
-        v
-AI says "ask_user"? --> Slack configured? --> YES --> Escalate to Slack
-        |                      |
-        v                      v NO
-Park as pending         Deny (no escalation path)
-        |
-        v
-Human calls submit_approval --> Return decision
-```
-
-## Troubleshooting
-
-### "ANTHROPIC_API_KEY environment variable not set"
-
-**Solution:** Set your API key in `.env` file or environment:
-```bash
-export ANTHROPIC_API_KEY=sk-ant-your-key-here
-```
-
-### "AI evaluator unavailable, requires manual approval"
-
-**Problem:** Anthropic API initialization failed
-**Solution:** Check API key, network connection, and Anthropic service status
-
-### All operations denied
-
-**Problem:** MCP server not registered correctly
-**Solution:** Verify `mcp-servers.json` configuration and server path
-
-### Tier 2 not approving expected operations
-
-**Problem:** Pattern not in safe category list
-**Solution:** Review `phlegyas/tier2_safe.py` and add pattern, or file GitHub issue
-
-## Security Best Practices
-
-1. **Start conservative** - Begin with most operations requiring approval
-2. **Review audit logs** - Regularly check `audit.jsonl` for unusual patterns
-3. **Never auto-approve:**
-   - Production deployments
-   - Database schema changes
-   - Credential operations
-   - Main/master branch modifications
-4. **Use project context** - Set `PROJECT_NAME` and `CURRENT_TASK` for better AI decisions
-5. **Monitor costs** - Track Tier 3 usage via audit logs
+575 tests covering all levels, prompt injection hardening, supervisor delegation, Slack integration, and end-to-end flows.
 
 ## Contributing
 
 Contributions welcome! See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style, and pull request guidelines.
 
-Areas for improvement:
+## Security
 
-- Additional safe operation patterns
-- Improved AI evaluation prompts
-- Slack/Teams/Discord integrations
-- Web UI for approval management
-- Machine learning for pattern detection
+See [SECURITY.md](SECURITY.md) for vulnerability reporting and known considerations around LLM-as-judge prompt injection.
 
 ## License
 
-MIT License - See LICENSE file for details
+[MIT](LICENSE)
 
-## Credits
+## Part of the Agent Infrastructure Trio
 
-Created by Christopher J. Anderson for autonomous Claude Code multi-agent workflows.
-
-Inspired by the `--permission-prompt-tool` documentation and real-world needs for remote approval while maintaining security.
+| Tool | Purpose |
+|------|---------|
+| [**AgentGit**](https://github.com/innago-property-management/stand-sure-ai) | Identity -- bot commits and pushes via GitHub App |
+| **Phlegyas** (this repo) | Authorization -- permission gate for tool use |
+| **Ratatoskr** *(coming soon)* | Capability -- agent tooling and coordination |

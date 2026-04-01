@@ -1,5 +1,6 @@
 .env
 *.key
+.claude/settings.local.json
 *.zip
 secrets/
 .idea/
