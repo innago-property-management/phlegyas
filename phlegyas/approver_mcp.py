@@ -267,6 +267,20 @@ def sanitize_for_audit(input_data: dict[str, Any]) -> dict[str, Any]:
     return _sanitize_value(input_data)
 
 
+_CORE_AUDIT_FIELDS = frozenset(
+    {
+        "timestamp",
+        "tool_name",
+        "input",
+        "tier",
+        "decision",
+        "reason",
+        "confidence",
+        "repo_context",
+    }
+)
+
+
 def write_audit_log(
     tool_name: str,
     input_data: dict[str, Any],
@@ -293,16 +307,6 @@ def write_audit_log(
     }
 
     # Merge extra fields, but protect core audit fields from collision
-    _CORE_AUDIT_FIELDS = {
-        "timestamp",
-        "tool_name",
-        "input",
-        "tier",
-        "decision",
-        "reason",
-        "confidence",
-        "repo_context",
-    }
     for key in extra_fields:
         if key in _CORE_AUDIT_FIELDS:
             logger.warning("Audit log extra_field '%s' collides with core field — dropped", key)
