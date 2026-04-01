@@ -233,8 +233,8 @@ def notify_supervisor(
             method="POST",
         )
         urllib.request.urlopen(req, timeout=2)
-    except Exception:
-        pass  # Best effort — file queue is the durable fallback
+    except Exception as exc:
+        logger.debug("HTTP notification to supervisor failed for %s: %s", request_id, exc)
 
     # macOS notification
     try:
@@ -244,8 +244,8 @@ def notify_supervisor(
             reason=f"Worker blocked: {input_summary}",
             request_id=request_id,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("macOS notification failed for %s: %s", request_id, exc)
 
 
 def notify_human_escalation(
@@ -281,8 +281,8 @@ def notify_human_escalation(
                 )
 
             asyncio.run(_send())
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("Slack escalation failed for %s: %s", request_id, exc)
 
     # macOS notification
     try:
@@ -292,8 +292,8 @@ def notify_human_escalation(
             reason=f"Supervisor timeout — needs human approval: {input_summary}",
             request_id=request_id,
         )
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.debug("macOS escalation notification failed for %s: %s", request_id, exc)
 
 
 # ---------------------------------------------------------------------------
