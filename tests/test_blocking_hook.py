@@ -376,6 +376,46 @@ class TestNotifySupervisor:
 
         mock_instance.notify.assert_called_once()
 
+    @patch("phlegyas.hook_blocking.urllib.request.urlopen")
+    @patch("phlegyas.hook_blocking.MacOSNotifier")
+    def test_rejects_non_local_url(self, mock_notifier_cls, mock_urlopen):
+        """SSRF guard: non-localhost URLs should be rejected without calling urlopen."""
+        from phlegyas.hook_blocking import BlockingConfig, notify_supervisor
+
+        config = BlockingConfig(
+            supervisor_id="sup-001",
+            cygnus_api_url="http://169.254.169.254",
+        )
+
+        notify_supervisor(
+            request_id="req-001",
+            tool_name="Bash",
+            input_summary="npm install",
+            config=config,
+        )
+
+        mock_urlopen.assert_not_called()
+
+    @patch("phlegyas.hook_blocking.urllib.request.urlopen")
+    @patch("phlegyas.hook_blocking.MacOSNotifier")
+    def test_rejects_non_http_scheme(self, mock_notifier_cls, mock_urlopen):
+        """SSRF guard: non-http schemes should be rejected."""
+        from phlegyas.hook_blocking import BlockingConfig, notify_supervisor
+
+        config = BlockingConfig(
+            supervisor_id="sup-001",
+            cygnus_api_url="file:///etc/passwd",
+        )
+
+        notify_supervisor(
+            request_id="req-001",
+            tool_name="Bash",
+            input_summary="npm install",
+            config=config,
+        )
+
+        mock_urlopen.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # run_blocking_delegation
