@@ -37,12 +37,12 @@ Phlegyas works as a Claude Code [pre-tool-use hook](https://docs.anthropic.com/e
 | Level | Name | What happens | Speed | Cost |
 |-------|------|-------------|-------|------|
 | **1** | Dangerous patterns | Instant deny via regex -- destructive ops, production targets, credential exposure | <1ms | $0 |
-| **1.5** | Hash-based trust (TOFU) | First call to a new script needs approval; SHA-256 hash stored so future identical calls auto-approve | <1ms | $0 |
 | **2** | Safe patterns | Instant allow via regex -- read-only tools, test runners, linters, builds | <1ms | $0 |
+| **2.5** | Hash-based trust (TOFU) | First call to a new script needs approval; SHA-256 hash stored so future identical calls auto-approve | <1ms | $0 |
 | **3** | AI evaluation | Claude (Haiku by default) judges ambiguous cases against project context and confidence thresholds | 200-500ms | ~$0.001 |
 | **3+** | Human escalation | When AI confidence is low, the decision is parked for a human via Slack, macOS notification, or file queue | async | $0 |
 
-The levels are evaluated in order: dangerous check first (nothing can bypass it), then trust store, then safe patterns, then AI, then human. This means a trusted script that suddenly contains `rm -rf /` will still be blocked by Level 1.
+The levels are evaluated in order: dangerous check first (nothing can bypass it), then safe patterns, then trust store, then AI, then human. This means a trusted script that suddenly contains `rm -rf /` will still be blocked by Level 1.
 
 ### Hash-Based Trust: The Clever Bit
 
@@ -145,7 +145,7 @@ if __name__ == "__main__":
 
 ### Option B: MCP Server (Full Feature Set)
 
-For AI evaluation (Level 3), hash-based trust (Level 1.5), and Slack escalation:
+For AI evaluation (Level 3), hash-based trust (Level 2.5), and Slack escalation:
 
 1. Set your API key:
 
@@ -184,7 +184,7 @@ claude --permission-prompt-tool mcp__phlegyas__permissions__approve \
 | Feature | Hook (PreToolUse) | MCP Server |
 |---------|-------------------|------------|
 | Level 1 (dangerous) + Level 2 (safe) | Yes | Yes |
-| Level 1.5 (hash-based trust) | No | Yes |
+| Level 2.5 (hash-based trust) | No | Yes |
 | Level 3 (AI evaluation) | No | Yes |
 | Slack escalation | No | Yes |
 | Latency | <10ms | <1ms (Level 1/2), 200-500ms (Level 3) |
@@ -285,10 +285,10 @@ Claude Code Tool Call
 Level 1: Dangerous? --> YES --> DENY (instant)
         |
         v NO
-Level 1.5: Trusted script? --> YES (hash matches) --> ALLOW (instant)
+Level 2: Safe pattern? --> YES --> ALLOW (instant)
         |
         v NO
-Level 2: Safe pattern? --> YES --> ALLOW (instant)
+Level 2.5: Trusted script? --> YES (hash matches) --> ALLOW (instant)
         |
         v NO
 Level 3: AI evaluation
