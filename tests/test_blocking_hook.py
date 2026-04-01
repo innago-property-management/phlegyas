@@ -99,6 +99,24 @@ class TestGetBlockingConfig:
         assert config.agent_id == "agent-001"
         assert config.cygnus_api_url == "http://localhost:5000"
 
+    def test_malformed_timeout_env_falls_back(self, monkeypatch):
+        """Non-numeric env vars should fall back to defaults, not raise."""
+        monkeypatch.setenv("PHLEGYAS_SUPERVISOR_TIMEOUT_SECONDS", "not_a_number")
+        monkeypatch.setenv("PHLEGYAS_HUMAN_TIMEOUT_SECONDS", "also_bad")
+        monkeypatch.setenv("PHLEGYAS_POLL_INTERVAL_SECONDS", "nope")
+        monkeypatch.delenv("CYGNUS_SUPERVISOR_ID", raising=False)
+        monkeypatch.delenv("CYGNUS_WORKFLOW_ID", raising=False)
+        monkeypatch.delenv("CYGNUS_AGENT_ID", raising=False)
+        monkeypatch.delenv("CYGNUS_API_URL", raising=False)
+        monkeypatch.delenv("PHLEGYAS_QUEUE_DIR", raising=False)
+
+        from phlegyas.hook_blocking import get_blocking_config
+
+        config = get_blocking_config()
+        assert config.supervisor_timeout == 60
+        assert config.human_timeout == 120
+        assert config.poll_interval == 2.0
+
 
 # ---------------------------------------------------------------------------
 # create_pending_approval

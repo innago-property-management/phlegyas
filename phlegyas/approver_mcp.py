@@ -292,8 +292,22 @@ def write_audit_log(
         "repo_context": repo_context if repo_context is not None else os.path.basename(os.getcwd()),
     }
 
-    # Merge any extra fields (e.g. was_overridden, override_decision, delegation_phase)
-    log_entry.update(extra_fields)
+    # Merge extra fields, but protect core audit fields from collision
+    _CORE_AUDIT_FIELDS = {
+        "timestamp",
+        "tool_name",
+        "input",
+        "tier",
+        "decision",
+        "reason",
+        "confidence",
+        "repo_context",
+    }
+    for key in extra_fields:
+        if key in _CORE_AUDIT_FIELDS:
+            logger.warning("Audit log extra_field '%s' collides with core field — dropped", key)
+        else:
+            log_entry[key] = extra_fields[key]
 
     try:
         with open(state.audit_log_file, "a", encoding="utf-8") as f:
@@ -1252,7 +1266,7 @@ def _load_pending_from_file(request_id: str, file_queue: FileQueueWriter) -> Pen
     return PendingApproval(
         request_id=rid,
         tool_name=tool_name,
-        input_data=data.get("input_data", {}),
+        input_data=data.get("input_data") or {"summary": data.get("input_summary", "")},
         reason=data.get("reason", ""),
         confidence=confidence,
         tier=data.get("tier", "tier3_needs_human"),

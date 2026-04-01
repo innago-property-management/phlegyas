@@ -63,10 +63,24 @@ def get_blocking_config() -> BlockingConfig:
         Path(queue_dir_str) if queue_dir_str else Path.home() / ".claude" / "pending-approvals"
     )
 
+    def _safe_int(var: str, default: int) -> int:
+        try:
+            return int(os.getenv(var, str(default)))
+        except ValueError:
+            logger.warning("Invalid %s, using default %d", var, default)
+            return default
+
+    def _safe_float(var: str, default: float) -> float:
+        try:
+            return float(os.getenv(var, str(default)))
+        except ValueError:
+            logger.warning("Invalid %s, using default %s", var, default)
+            return default
+
     return BlockingConfig(
-        supervisor_timeout=int(os.getenv("PHLEGYAS_SUPERVISOR_TIMEOUT_SECONDS", "60")),
-        human_timeout=int(os.getenv("PHLEGYAS_HUMAN_TIMEOUT_SECONDS", "120")),
-        poll_interval=float(os.getenv("PHLEGYAS_POLL_INTERVAL_SECONDS", "2")),
+        supervisor_timeout=_safe_int("PHLEGYAS_SUPERVISOR_TIMEOUT_SECONDS", 60),
+        human_timeout=_safe_int("PHLEGYAS_HUMAN_TIMEOUT_SECONDS", 120),
+        poll_interval=_safe_float("PHLEGYAS_POLL_INTERVAL_SECONDS", 2.0),
         queue_dir=queue_dir,
         supervisor_id=os.getenv("CYGNUS_SUPERVISOR_ID"),
         workflow_id=os.getenv("CYGNUS_WORKFLOW_ID"),
@@ -213,6 +227,21 @@ def notify_supervisor(
     Never raises, never blocks beyond the 2s HTTP timeout.
     """
     # HTTP POST to Cygnus supervisor API
+    # SSRF guard: only allow localhost targets
+    try:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(config.cygnus_api_url)
+        if parsed.scheme not in ("http", "https"):
+            logger.warning("CYGNUS_API_URL has invalid scheme: %s", parsed.scheme)
+            return
+        if parsed.hostname not in ("localhost", "127.0.0.1", "::1"):
+            logger.warning("CYGNUS_API_URL must be localhost, got: %s", parsed.hostname)
+            return
+    except Exception:
+        logger.warning("Failed to parse CYGNUS_API_URL: %s", config.cygnus_api_url)
+        return
+
     try:
         data = json.dumps(
             {

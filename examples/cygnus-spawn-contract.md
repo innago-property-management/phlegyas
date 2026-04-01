@@ -37,7 +37,7 @@ hook timeout (the global default is 5 seconds, too short for blocking):
       "matcher": "*",
       "hooks": [{
         "type": "command",
-        "command": "/Volumes/Repos/phlegyas/.venv/bin/python3 ~/.claude/hooks/phlegyas-guardrail.py",
+        "command": "/path/to/phlegyas/.venv/bin/python3 ~/.claude/hooks/phlegyas-guardrail.py",
         "timeout": 300000
       }]
     }]

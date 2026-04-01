@@ -554,6 +554,34 @@ class TestEnhancedAuditFields:
         entry = json.loads(audit_file.read_text().strip())
         assert entry["repo_context"] == "my-repo"
 
+    def test_audit_log_warns_on_core_field_collision(self, tmp_path):
+        """Extra fields colliding with core audit fields should be dropped with a warning."""
+        audit_file = tmp_path / "audit.jsonl"
+
+        with (
+            patch.object(state, "audit_log_file", str(audit_file)),
+            patch.object(state, "enable_audit_log", True),
+        ):
+            # Use non-overlapping keyword names to avoid Python TypeError,
+            # but test fields that collide with log_entry keys built inside the function
+            write_audit_log(
+                tool_name="Bash",
+                input_data={"command": "ls"},
+                decision="allow",
+                tier="tier2_safe",
+                reason="safe",
+                # These collide with core log_entry keys (timestamp, tool_name, etc.)
+                timestamp="2000-01-01T00:00:00Z",
+                tool_name_override="should_not_appear",  # not a core field — passes
+                legit_field="ok",
+            )
+
+        entry = json.loads(audit_file.read_text().strip())
+        # Core "timestamp" field must not be overwritten
+        assert entry["timestamp"] != "2000-01-01T00:00:00Z"
+        # Non-colliding extra fields should still be present
+        assert entry["legit_field"] == "ok"
+
     def test_audit_log_extra_fields_merged(self, tmp_path):
         """Extra keyword arguments should be merged into the audit entry."""
         audit_file = tmp_path / "audit.jsonl"
