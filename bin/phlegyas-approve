@@ -15,6 +15,9 @@ set -euo pipefail
 QUEUE_DIR="${PHLEGYAS_QUEUE_DIR:-$HOME/.claude/pending-approvals}"
 APPROVER_ID="${PHLEGYAS_APPROVER_ID:-human:$(whoami)}"
 
+# UUID v4 regex for request_id validation
+UUID_RE='^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -26,42 +29,132 @@ NC='\033[0m'
 
 die() { echo -e "${RED}error:${NC} $*" >&2; exit 1; }
 
+validate_uuid() {
+    local id="$1"
+    if ! [[ "$id" =~ $UUID_RE ]]; then
+        die "Invalid request_id (must be UUID): $id"
+    fi
+}
+
 # ---------------------------------------------------------------------------
-# Helpers
+# Python helpers — all file paths passed via env vars, never interpolated
+# ---------------------------------------------------------------------------
+
+# Read a field from a JSON file. Usage: read_field <file> <field>
+read_field() {
+    PHLEGYAS_FILE="$1" PHLEGYAS_FIELD="$2" python3 -c '
+import json, os
+try:
+    with open(os.environ["PHLEGYAS_FILE"]) as f:
+        d = json.load(f)
+    print(d.get(os.environ["PHLEGYAS_FIELD"], ""))
+except: pass
+'
+}
+
+# Read a field truncated. Usage: read_field_trunc <file> <field> <maxlen>
+read_field_trunc() {
+    PHLEGYAS_FILE="$1" PHLEGYAS_FIELD="$2" PHLEGYAS_MAXLEN="$3" python3 -c '
+import json, os
+try:
+    with open(os.environ["PHLEGYAS_FILE"]) as f:
+        d = json.load(f)
+    val = d.get(os.environ["PHLEGYAS_FIELD"], "")
+    print(str(val)[:int(os.environ["PHLEGYAS_MAXLEN"])])
+except: pass
+'
+}
+
+# Check if a file is expired. Returns "true" or "false"
+is_expired() {
+    PHLEGYAS_FILE="$1" python3 -c '
+import json, os
+from datetime import datetime, timezone
+try:
+    with open(os.environ["PHLEGYAS_FILE"]) as f:
+        d = json.load(f)
+    exp = d.get("expires_at", "")
+    dt = datetime.fromisoformat(exp)
+    if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+    print("true" if datetime.now(timezone.utc) > dt else "false")
+except: print("false")
+'
+}
+
+# Produce fzf line for a file: "request_id\ttool\tsummary[tag]"
+fzf_line() {
+    PHLEGYAS_FILE="$1" python3 -c '
+import json, os, sys
+from datetime import datetime, timezone
+try:
+    with open(os.environ["PHLEGYAS_FILE"]) as f:
+        d = json.load(f)
+    if d.get("status") != "pending": sys.exit(0)
+    rid = d.get("request_id", "")
+    tool = d.get("tool_name", "")
+    summary = d.get("input_summary", "")[:60]
+    try:
+        dt = datetime.fromisoformat(d.get("expires_at", ""))
+        if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+        expired = datetime.now(timezone.utc) > dt
+    except: expired = False
+    tag = " [EXPIRED]" if expired else ""
+    print(f"{rid}\t{tool}\t{summary}{tag}")
+except: pass
+'
+}
+
+# Pretty-print a file for detail view
+pretty_print() {
+    PHLEGYAS_FILE="$1" python3 -c '
+import json, os
+with open(os.environ["PHLEGYAS_FILE"]) as f:
+    d = json.load(f)
+print(f"Tool:    {d.get(\"tool_name\",\"\")}")
+print(f"Summary: {d.get(\"input_summary\",\"\")}")
+print(f"Reason:  {d.get(\"reason\",\"\")}")
+print(f"Conf:    {d.get(\"confidence\",\"\")}")
+print(f"Created: {d.get(\"created_at\",\"\")[:19]}")
+'
+}
+
+# Resolve: update status in file atomically
+do_resolve() {
+    PHLEGYAS_FILE="$1" PHLEGYAS_TMP="$2" PHLEGYAS_DECISION="$3" \
+    PHLEGYAS_APPROVER="$4" PHLEGYAS_DECIDED_AT="$5" python3 -c '
+import json, os
+with open(os.environ["PHLEGYAS_FILE"]) as f:
+    data = json.load(f)
+data["status"] = os.environ["PHLEGYAS_DECISION"]
+data["decided_by"] = os.environ["PHLEGYAS_APPROVER"]
+data["decided_at"] = os.environ["PHLEGYAS_DECIDED_AT"]
+with open(os.environ["PHLEGYAS_TMP"], "w") as f:
+    json.dump(data, f, indent=2)
+'
+}
+
+# ---------------------------------------------------------------------------
+# Commands
 # ---------------------------------------------------------------------------
 
 list_pending() {
     local count=0
-    local now
-    now=$(date -u +%s)
-
     for f in "$QUEUE_DIR"/*.json; do
         [ -f "$f" ] || continue
-        local status tool summary reason created expires req_id
-        status=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('status',''))" 2>/dev/null) || continue
+        local status
+        status=$(read_field "$f" "status") || continue
         [ "$status" = "pending" ] || continue
 
-        req_id=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('request_id',''))" 2>/dev/null)
-        tool=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('tool_name',''))" 2>/dev/null)
-        summary=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('input_summary','')[:80])" 2>/dev/null)
-        reason=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('reason','')[:60])" 2>/dev/null)
-        created=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('created_at','')[:19])" 2>/dev/null)
-        expires=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('expires_at','')[:19])" 2>/dev/null)
+        local req_id tool summary reason created expires expired_tag
+        req_id=$(read_field "$f" "request_id")
+        tool=$(read_field "$f" "tool_name")
+        summary=$(read_field_trunc "$f" "input_summary" 80)
+        reason=$(read_field_trunc "$f" "reason" 60)
+        created=$(read_field_trunc "$f" "created_at" 19)
+        expires=$(read_field_trunc "$f" "expires_at" 19)
 
-        # Check if expired
-        local exp_epoch
-        exp_epoch=$(python3 -c "
-from datetime import datetime, timezone
-try:
-    dt = datetime.fromisoformat('$expires')
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    print(int(dt.timestamp()))
-except: print(0)
-" 2>/dev/null)
-
-        local expired_tag=""
-        if [ "$exp_epoch" -gt 0 ] && [ "$now" -gt "$exp_epoch" ]; then
+        expired_tag=""
+        if [ "$(is_expired "$f")" = "true" ]; then
             expired_tag=" ${RED}[EXPIRED]${NC}"
         fi
 
@@ -79,54 +172,28 @@ except: print(0)
     fi
 }
 
-# Build fzf-friendly list: "short_id | tool | summary"
 fzf_list() {
     for f in "$QUEUE_DIR"/*.json; do
         [ -f "$f" ] || continue
-        python3 -c "
-import json, sys
-from datetime import datetime, timezone
-try:
-    d = json.load(open('$f'))
-    if d.get('status') != 'pending': sys.exit(0)
-    rid = d.get('request_id','')
-    tool = d.get('tool_name','')
-    summary = d.get('input_summary','')[:60]
-    exp = d.get('expires_at','')
-    try:
-        dt = datetime.fromisoformat(exp)
-        if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-        expired = datetime.now(timezone.utc) > dt
-    except: expired = False
-    tag = ' [EXPIRED]' if expired else ''
-    print(f'{rid}\t{tool}\t{summary}{tag}')
-except: pass
-" 2>/dev/null
+        fzf_line "$f"
     done
 }
 
 resolve_approval() {
     local req_id="$1"
     local decision="$2"  # "approved" or "denied"
-    local file="$QUEUE_DIR/${req_id}.json"
 
+    validate_uuid "$req_id"
+
+    local file="$QUEUE_DIR/${req_id}.json"
     [ -f "$file" ] || die "File not found: $file"
 
     local decided_at
     decided_at=$(python3 -c "from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat())")
 
-    # Atomic update: write to tmp, chmod, rename
     local tmp_file="${file}.tmp"
-    python3 -c "
-import json
-with open('$file') as f:
-    data = json.load(f)
-data['status'] = '$decision'
-data['decided_by'] = '$APPROVER_ID'
-data['decided_at'] = '$decided_at'
-with open('$tmp_file', 'w') as f:
-    json.dump(data, f, indent=2)
-" || die "Failed to write resolution"
+    do_resolve "$file" "$tmp_file" "$decision" "$APPROVER_ID" "$decided_at" \
+        || die "Failed to write resolution"
 
     chmod 600 "$tmp_file"
     mv "$tmp_file" "$file"
@@ -139,13 +206,11 @@ with open('$tmp_file', 'w') as f:
 }
 
 clean_stale() {
-    local now removed=0
-    now=$(date -u +%s)
-
+    local removed=0
     for f in "$QUEUE_DIR"/*.json; do
         [ -f "$f" ] || continue
-        local status exp_epoch
-        status=$(python3 -c "import json; print(json.load(open('$f')).get('status',''))" 2>/dev/null) || continue
+        local status
+        status=$(read_field "$f" "status") || continue
 
         # Remove already-resolved files
         if [ "$status" != "pending" ]; then
@@ -155,18 +220,7 @@ clean_stale() {
         fi
 
         # Remove expired pending files
-        exp_epoch=$(python3 -c "
-from datetime import datetime, timezone
-import json
-try:
-    d = json.load(open('$f'))
-    dt = datetime.fromisoformat(d.get('expires_at',''))
-    if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
-    print(int(dt.timestamp()))
-except: print(0)
-" 2>/dev/null)
-
-        if [ "$exp_epoch" -gt 0 ] && [ "$now" -gt "$exp_epoch" ]; then
+        if [ "$(is_expired "$f")" = "true" ]; then
             rm -f "$f"
             removed=$((removed + 1))
         fi
@@ -182,12 +236,26 @@ except: print(0)
 interactive() {
     command -v fzf >/dev/null 2>&1 || die "fzf not found — install with: brew install fzf"
 
+    # Create a preview script that uses env vars
+    local preview_script
+    preview_script=$(mktemp)
+    cat > "$preview_script" << 'PREVIEW_EOF'
+#!/usr/bin/env bash
+PHLEGYAS_FILE="$1" python3 -c '
+import json, os
+with open(os.environ["PHLEGYAS_FILE"]) as f:
+    print(json.dumps(json.load(f), indent=2))
+' 2>/dev/null
+PREVIEW_EOF
+    chmod +x "$preview_script"
+    trap 'rm -f "$preview_script"' EXIT
+
     local selection
     selection=$(fzf_list | fzf \
-        --header="Select approval (TAB to preview, ENTER to decide)" \
-        --preview="cat '$QUEUE_DIR/{1}.json' | python3 -m json.tool 2>/dev/null" \
+        --header="Select approval (ENTER to decide)" \
+        --preview="$preview_script $QUEUE_DIR/{1}.json" \
         --preview-window=right:50%:wrap \
-        --delimiter='\t' \
+        --delimiter=$'\t' \
         --with-nth=1,2,3 \
         --prompt="phlegyas> " \
         --height=80% \
@@ -197,21 +265,12 @@ interactive() {
     local req_id
     req_id=$(echo "$selection" | cut -f1)
     [ -n "$req_id" ] || exit 0
+    validate_uuid "$req_id"
 
-    # Show details
     echo ""
-    python3 -c "
-import json
-d = json.load(open('$QUEUE_DIR/${req_id}.json'))
-print(f\"Tool:    {d.get('tool_name','')}\" )
-print(f\"Summary: {d.get('input_summary','')}\" )
-print(f\"Reason:  {d.get('reason','')}\" )
-print(f\"Conf:    {d.get('confidence','')}\" )
-print(f\"Created: {d.get('created_at','')[:19]}\" )
-" 2>/dev/null
+    pretty_print "$QUEUE_DIR/${req_id}.json" 2>/dev/null
     echo ""
 
-    # Prompt for decision
     local decision
     echo -e "  ${GREEN}[a]${NC}pprove  ${RED}[d]${NC}eny  ${DIM}[q]${NC}uit"
     read -r -n1 -p "  > " decision
@@ -248,8 +307,8 @@ case "${1:-}" in
         echo ""
         echo "Commands:"
         echo "  (none)          Interactive fzf picker"
-        echo "  approve <id>    Approve by request_id"
-        echo "  deny <id>       Deny by request_id"
+        echo "  approve <id>    Approve by request_id (UUID)"
+        echo "  deny <id>       Deny by request_id (UUID)"
         echo "  list            List pending approvals"
         echo "  clean           Remove expired/resolved files"
         echo ""
