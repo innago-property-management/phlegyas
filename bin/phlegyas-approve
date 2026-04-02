@@ -1,0 +1,266 @@
+#!/usr/bin/env bash
+# phlegyas-approve — CLI for approving/denying pending approval requests
+#
+# Usage:
+#   phlegyas-approve                  # interactive fzf picker
+#   phlegyas-approve approve <id>     # approve by request_id
+#   phlegyas-approve deny <id>        # deny by request_id
+#   phlegyas-approve list             # list pending approvals
+#   phlegyas-approve clean            # remove expired/stale files
+#
+# Writes resolution directly to the file queue (no MCP server needed).
+
+set -euo pipefail
+
+QUEUE_DIR="${PHLEGYAS_QUEUE_DIR:-$HOME/.claude/pending-approvals}"
+APPROVER_ID="${PHLEGYAS_APPROVER_ID:-human:$(whoami)}"
+
+# Colors
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+CYAN='\033[0;36m'
+DIM='\033[0;90m'
+BOLD='\033[1m'
+NC='\033[0m'
+
+die() { echo -e "${RED}error:${NC} $*" >&2; exit 1; }
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+list_pending() {
+    local count=0
+    local now
+    now=$(date -u +%s)
+
+    for f in "$QUEUE_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        local status tool summary reason created expires req_id
+        status=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('status',''))" 2>/dev/null) || continue
+        [ "$status" = "pending" ] || continue
+
+        req_id=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('request_id',''))" 2>/dev/null)
+        tool=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('tool_name',''))" 2>/dev/null)
+        summary=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('input_summary','')[:80])" 2>/dev/null)
+        reason=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('reason','')[:60])" 2>/dev/null)
+        created=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('created_at','')[:19])" 2>/dev/null)
+        expires=$(python3 -c "import json; d=json.load(open('$f')); print(d.get('expires_at','')[:19])" 2>/dev/null)
+
+        # Check if expired
+        local exp_epoch
+        exp_epoch=$(python3 -c "
+from datetime import datetime, timezone
+try:
+    dt = datetime.fromisoformat('$expires')
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    print(int(dt.timestamp()))
+except: print(0)
+" 2>/dev/null)
+
+        local expired_tag=""
+        if [ "$exp_epoch" -gt 0 ] && [ "$now" -gt "$exp_epoch" ]; then
+            expired_tag=" ${RED}[EXPIRED]${NC}"
+        fi
+
+        echo -e "${BOLD}${req_id:0:8}${NC}  ${CYAN}${tool}${NC}  ${summary}${expired_tag}"
+        echo -e "  ${DIM}reason: ${reason}${NC}"
+        echo -e "  ${DIM}created: ${created}  expires: ${expires}${NC}"
+        echo ""
+        count=$((count + 1))
+    done
+
+    if [ "$count" -eq 0 ]; then
+        echo -e "${GREEN}No pending approvals.${NC}"
+    else
+        echo -e "${DIM}${count} pending approval(s)${NC}"
+    fi
+}
+
+# Build fzf-friendly list: "short_id | tool | summary"
+fzf_list() {
+    for f in "$QUEUE_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        python3 -c "
+import json, sys
+from datetime import datetime, timezone
+try:
+    d = json.load(open('$f'))
+    if d.get('status') != 'pending': sys.exit(0)
+    rid = d.get('request_id','')
+    tool = d.get('tool_name','')
+    summary = d.get('input_summary','')[:60]
+    exp = d.get('expires_at','')
+    try:
+        dt = datetime.fromisoformat(exp)
+        if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+        expired = datetime.now(timezone.utc) > dt
+    except: expired = False
+    tag = ' [EXPIRED]' if expired else ''
+    print(f'{rid}\t{tool}\t{summary}{tag}')
+except: pass
+" 2>/dev/null
+    done
+}
+
+resolve_approval() {
+    local req_id="$1"
+    local decision="$2"  # "approved" or "denied"
+    local file="$QUEUE_DIR/${req_id}.json"
+
+    [ -f "$file" ] || die "File not found: $file"
+
+    local decided_at
+    decided_at=$(python3 -c "from datetime import datetime, timezone; print(datetime.now(timezone.utc).isoformat())")
+
+    # Atomic update: write to tmp, chmod, rename
+    local tmp_file="${file}.tmp"
+    python3 -c "
+import json
+with open('$file') as f:
+    data = json.load(f)
+data['status'] = '$decision'
+data['decided_by'] = '$APPROVER_ID'
+data['decided_at'] = '$decided_at'
+with open('$tmp_file', 'w') as f:
+    json.dump(data, f, indent=2)
+" || die "Failed to write resolution"
+
+    chmod 600 "$tmp_file"
+    mv "$tmp_file" "$file"
+
+    if [ "$decision" = "approved" ] || [ "$decision" = "approve" ]; then
+        echo -e "${GREEN}✓ Approved${NC} ${req_id:0:8}"
+    else
+        echo -e "${RED}✗ Denied${NC} ${req_id:0:8}"
+    fi
+}
+
+clean_stale() {
+    local now removed=0
+    now=$(date -u +%s)
+
+    for f in "$QUEUE_DIR"/*.json; do
+        [ -f "$f" ] || continue
+        local status exp_epoch
+        status=$(python3 -c "import json; print(json.load(open('$f')).get('status',''))" 2>/dev/null) || continue
+
+        # Remove already-resolved files
+        if [ "$status" != "pending" ]; then
+            rm -f "$f"
+            removed=$((removed + 1))
+            continue
+        fi
+
+        # Remove expired pending files
+        exp_epoch=$(python3 -c "
+from datetime import datetime, timezone
+import json
+try:
+    d = json.load(open('$f'))
+    dt = datetime.fromisoformat(d.get('expires_at',''))
+    if dt.tzinfo is None: dt = dt.replace(tzinfo=timezone.utc)
+    print(int(dt.timestamp()))
+except: print(0)
+" 2>/dev/null)
+
+        if [ "$exp_epoch" -gt 0 ] && [ "$now" -gt "$exp_epoch" ]; then
+            rm -f "$f"
+            removed=$((removed + 1))
+        fi
+    done
+
+    echo -e "${GREEN}Cleaned ${removed} stale file(s)${NC}"
+}
+
+# ---------------------------------------------------------------------------
+# Interactive fzf picker
+# ---------------------------------------------------------------------------
+
+interactive() {
+    command -v fzf >/dev/null 2>&1 || die "fzf not found — install with: brew install fzf"
+
+    local selection
+    selection=$(fzf_list | fzf \
+        --header="Select approval (TAB to preview, ENTER to decide)" \
+        --preview="cat '$QUEUE_DIR/{1}.json' | python3 -m json.tool 2>/dev/null" \
+        --preview-window=right:50%:wrap \
+        --delimiter='\t' \
+        --with-nth=1,2,3 \
+        --prompt="phlegyas> " \
+        --height=80% \
+        --border \
+        --ansi) || exit 0
+
+    local req_id
+    req_id=$(echo "$selection" | cut -f1)
+    [ -n "$req_id" ] || exit 0
+
+    # Show details
+    echo ""
+    python3 -c "
+import json
+d = json.load(open('$QUEUE_DIR/${req_id}.json'))
+print(f\"Tool:    {d.get('tool_name','')}\" )
+print(f\"Summary: {d.get('input_summary','')}\" )
+print(f\"Reason:  {d.get('reason','')}\" )
+print(f\"Conf:    {d.get('confidence','')}\" )
+print(f\"Created: {d.get('created_at','')[:19]}\" )
+" 2>/dev/null
+    echo ""
+
+    # Prompt for decision
+    local decision
+    echo -e "  ${GREEN}[a]${NC}pprove  ${RED}[d]${NC}eny  ${DIM}[q]${NC}uit"
+    read -r -n1 -p "  > " decision
+    echo ""
+
+    case "$decision" in
+        a|A) resolve_approval "$req_id" "approved" ;;
+        d|D) resolve_approval "$req_id" "denied" ;;
+        *) echo "Cancelled." ;;
+    esac
+}
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+case "${1:-}" in
+    approve)
+        [ -n "${2:-}" ] || die "Usage: phlegyas-approve approve <request_id>"
+        resolve_approval "$2" "approved"
+        ;;
+    deny)
+        [ -n "${2:-}" ] || die "Usage: phlegyas-approve deny <request_id>"
+        resolve_approval "$2" "denied"
+        ;;
+    list)
+        list_pending
+        ;;
+    clean)
+        clean_stale
+        ;;
+    help|--help|-h)
+        echo "Usage: phlegyas-approve [command] [args]"
+        echo ""
+        echo "Commands:"
+        echo "  (none)          Interactive fzf picker"
+        echo "  approve <id>    Approve by request_id"
+        echo "  deny <id>       Deny by request_id"
+        echo "  list            List pending approvals"
+        echo "  clean           Remove expired/resolved files"
+        echo ""
+        echo "Environment:"
+        echo "  PHLEGYAS_QUEUE_DIR     Queue directory (default: ~/.claude/pending-approvals)"
+        echo "  PHLEGYAS_APPROVER_ID   Approver identity (default: human:\$(whoami))"
+        ;;
+    "")
+        interactive
+        ;;
+    *)
+        die "Unknown command: $1 (try --help)"
+        ;;
+esac
