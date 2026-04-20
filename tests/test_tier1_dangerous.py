@@ -260,6 +260,28 @@ class TestDangerousPatternDetector:
             assert is_dangerous is True, f"Failed to detect production command: {command}"
             assert reason is not None
 
+    # Nonprod negation — nonprod/non-prod/nonproduction must NOT be flagged
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "kubectl apply -f nonprod.yaml",
+            "deploy --env=nonprod",
+            "kubectl config use-context non-prod",
+            "helm install app nonproduction",
+            "kubectl get pods -n nonprod-cluster",
+            "aws eks --cluster nonprod-us-east",
+        ],
+    )
+    def test_should_not_flag_nonprod_as_production(self, detector, command):
+        """nonprod/non-prod/nonproduction should NOT be flagged as production."""
+        is_dangerous, reason = detector.is_dangerous("Bash", {"command": command})
+        # Either not dangerous, or dangerous for some OTHER reason (not production)
+        if is_dangerous:
+            assert "production" not in (reason or "").lower(), (
+                f"nonprod command incorrectly flagged as production: {command} -> {reason}"
+            )
+
     def test_should_detect_all_credential_patterns(self, detector, credential_patterns):
         """Should detect all credential patterns in writes."""
         for content in credential_patterns:

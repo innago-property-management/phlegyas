@@ -66,6 +66,9 @@ class DangerousPatternDetector:
         re.compile(r"helm\s+(uninstall|delete)\s+", re.IGNORECASE),  # helm uninstall / helm delete
     ]
 
+    # Negates production match — if this hits, skip PRODUCTION_PATTERNS check
+    _NONPROD_RE = re.compile(r"\bnon[-_]?prod(?:uction)?\b", re.IGNORECASE)
+
     PRODUCTION_PATTERNS = [
         re.compile(r"production", re.IGNORECASE),
         re.compile(r"prod[-_]", re.IGNORECASE),
@@ -177,13 +180,14 @@ class DangerousPatternDetector:
                     f"Blocked: Dangerous infrastructure operation detected - {pattern.pattern}",
                 )
 
-        # Check production operations
-        for pattern in self.PRODUCTION_PATTERNS:
-            if pattern.search(stripped):
-                return (
-                    True,
-                    f"Blocked: Production environment operation detected - {pattern.pattern}",
-                )
+        # Check production operations (skip if command is clearly non-production)
+        if not self._NONPROD_RE.search(stripped):
+            for pattern in self.PRODUCTION_PATTERNS:
+                if pattern.search(stripped):
+                    return (
+                        True,
+                        f"Blocked: Production environment operation detected - {pattern.pattern}",
+                    )
 
         # Check network operations
         for pattern in self.NETWORK_PATTERNS:

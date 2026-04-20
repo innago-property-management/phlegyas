@@ -340,6 +340,37 @@ class TestSafeOperationDetector:
         is_safe, category = detector.is_safe("Bash", {"command": "find . -name '*.py'"})
         assert is_safe is False
 
+    # Safe kubectl read commands (for gemini CLI and similar agents)
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "kubectl get pods",
+            "kubectl get pods -n default",
+            "kubectl get deployments --all-namespaces",
+            "kubectl describe pod my-pod",
+            "kubectl describe deployment my-app",
+            "kubectl logs my-pod",
+            "kubectl logs -f my-pod --tail=100",
+            "kubectl top pods",
+            "kubectl top nodes",
+            "kubectl version",
+            "kubectl cluster-info",
+            "kubectl api-resources",
+            "kubectl api-versions",
+            "kubectl explain pod",
+            "kubectl config current-context",
+            "kubectl config get-contexts",
+            "kubectl config view",
+            "kubectl config use-context dev",
+        ],
+    )
+    def test_should_approve_safe_kubectl_reads(self, detector, command):
+        """Read-only kubectl commands should be auto-approved."""
+        is_safe, category = detector.is_safe("Bash", {"command": command})
+        assert is_safe is True, f"Failed to approve: {command}"
+        assert "kubectl" in category or "read-only" in category
+
     def test_should_approve_ps(self, detector):
         """Should approve ps."""
         is_safe, category = detector.is_safe("Bash", {"command": "ps aux | grep node"})
