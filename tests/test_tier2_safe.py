@@ -362,14 +362,29 @@ class TestSafeOperationDetector:
             "kubectl config current-context",
             "kubectl config get-contexts",
             "kubectl config view",
-            "kubectl config use-context dev",
         ],
     )
     def test_should_approve_safe_kubectl_reads(self, detector, command):
         """Read-only kubectl commands should be auto-approved."""
         is_safe, category = detector.is_safe("Bash", {"command": command})
         assert is_safe is True, f"Failed to approve: {command}"
-        assert "kubectl" in category or "read-only" in category
+        assert category == "kubectl read-only command"
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # use-context mutates state (switches active context) — NOT read-only
+            "kubectl config use-context dev",
+            "kubectl config use-context prod",
+            "kubectl config use-context production-east",
+            # set-context also mutates
+            "kubectl config set-context dev --namespace=default",
+        ],
+    )
+    def test_should_not_auto_approve_kubectl_context_switches(self, detector, command):
+        """kubectl config use-context/set-context change state — must fall to Tier 3."""
+        is_safe, _ = detector.is_safe("Bash", {"command": command})
+        assert is_safe is False, f"use-context/set-context must not be auto-approved: {command}"
 
     def test_should_approve_ps(self, detector):
         """Should approve ps."""

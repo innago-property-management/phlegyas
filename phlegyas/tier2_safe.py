@@ -277,14 +277,14 @@ class SafeOperationDetector:
     ]
 
     # Safe kubectl reads (Tier 1 already blocks kubectl delete/apply/scale)
+    # NOTE: use-context/set-context deliberately excluded — they mutate state
+    # (switch active context), potentially widening blast radius. Fall to Tier 3.
     SAFE_KUBECTL_PATTERNS = [
         re.compile(r"^kubectl\s+(get|describe|logs|top|explain)\b", re.IGNORECASE),
         re.compile(
             r"^kubectl\s+(version|cluster-info|api-resources|api-versions)\b", re.IGNORECASE
         ),
-        re.compile(
-            r"^kubectl\s+config\s+(current-context|get-contexts|view|use-context)\b", re.IGNORECASE
-        ),
+        re.compile(r"^kubectl\s+config\s+(current-context|get-contexts|view)\b", re.IGNORECASE),
     ]
 
     # Package installation (generally safe in dev environments)
