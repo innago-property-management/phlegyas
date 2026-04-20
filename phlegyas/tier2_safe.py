@@ -276,6 +276,17 @@ class SafeOperationDetector:
         re.compile(r"^touch\s+", re.IGNORECASE),
     ]
 
+    # Safe kubectl reads (Tier 1 already blocks kubectl delete/apply/scale)
+    # NOTE: use-context/set-context deliberately excluded — they mutate state
+    # (switch active context), potentially widening blast radius. Fall to Tier 3.
+    SAFE_KUBECTL_PATTERNS = [
+        re.compile(r"^kubectl\s+(get|describe|logs|top|explain)\b", re.IGNORECASE),
+        re.compile(
+            r"^kubectl\s+(version|cluster-info|api-resources|api-versions)\b", re.IGNORECASE
+        ),
+        re.compile(r"^kubectl\s+config\s+(current-context|get-contexts|view)\b", re.IGNORECASE),
+    ]
+
     # Package installation (generally safe in dev environments)
     SAFE_INSTALL_PATTERNS = [
         re.compile(r"^npm\s+install", re.IGNORECASE),
@@ -409,6 +420,11 @@ class SafeOperationDetector:
         for pattern in self.SAFE_FILESYSTEM_PATTERNS:
             if pattern.search(command):
                 return True, "safe filesystem operation"
+
+        # Check safe kubectl reads (Tier 1 already blocks destructive kubectl)
+        for pattern in self.SAFE_KUBECTL_PATTERNS:
+            if pattern.search(command):
+                return True, "kubectl read-only command"
 
         # Check package installation
         for pattern in self.SAFE_INSTALL_PATTERNS:

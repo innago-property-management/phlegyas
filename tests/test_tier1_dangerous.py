@@ -260,6 +260,47 @@ class TestDangerousPatternDetector:
             assert is_dangerous is True, f"Failed to detect production command: {command}"
             assert reason is not None
 
+    # Nonprod negation — nonprod/non-prod/nonproduction must NOT be flagged
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            "kubectl apply -f nonprod.yaml",
+            "deploy --env=nonprod",
+            "kubectl config use-context non-prod",
+            "helm install app nonproduction",
+            "kubectl get pods -n nonprod-cluster",
+            "aws eks --cluster nonprod-us-east",
+        ],
+    )
+    def test_should_not_flag_nonprod_as_production(self, detector, command):
+        """nonprod/non-prod/nonproduction should NOT be flagged as production."""
+        is_dangerous, reason = detector.is_dangerous("Bash", {"command": command})
+        # Either not dangerous, or dangerous for some OTHER reason (not production)
+        if is_dangerous:
+            assert "production" not in (reason or "").lower(), (
+                f"nonprod command incorrectly flagged as production: {command} -> {reason}"
+            )
+
+    # Bypass resistance — nonprod as a flag value must NOT hide production target
+
+    @pytest.mark.parametrize(
+        "command",
+        [
+            # Production target with nonprod-named flag value — must still block
+            "helm upgrade prod-release ./chart --set env=nonprod",
+            "kubectl apply -f production.yaml --namespace=nonprod-test",
+            "deploy --to=prod-east --from=nonprod",
+            "aws s3 cp file.txt s3://prod-bucket/ --env nonprod",
+        ],
+    )
+    def test_nonprod_flag_does_not_hide_production_target(self, detector, command):
+        """Having 'nonprod' anywhere in the command must not bypass production detection
+        when a production-named target is actually being operated on."""
+        is_dangerous, reason = detector.is_dangerous("Bash", {"command": command})
+        assert is_dangerous is True, f"Production target not blocked: {command}"
+        assert "production" in (reason or "").lower(), f"Expected production block, got: {reason}"
+
     def test_should_detect_all_credential_patterns(self, detector, credential_patterns):
         """Should detect all credential patterns in writes."""
         for content in credential_patterns:

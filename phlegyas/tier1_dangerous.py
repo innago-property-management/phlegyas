@@ -66,10 +66,14 @@ class DangerousPatternDetector:
         re.compile(r"helm\s+(uninstall|delete)\s+", re.IGNORECASE),  # helm uninstall / helm delete
     ]
 
+    # PRODUCTION_PATTERNS use negative lookbehinds to avoid matching "nonprod"
+    # variants (nonprod, non-prod, non_prod, nonproduction). Lookbehinds apply
+    # only to the production token itself — other occurrences in the command
+    # (e.g. flag values) cannot mask a production-named target.
     PRODUCTION_PATTERNS = [
-        re.compile(r"production", re.IGNORECASE),
-        re.compile(r"prod[-_]", re.IGNORECASE),
-        re.compile(r"--env=prod", re.IGNORECASE),
+        re.compile(r"(?<!non)(?<!non-)(?<!non_)production", re.IGNORECASE),
+        re.compile(r"(?<!non)(?<!non-)(?<!non_)prod[-_]", re.IGNORECASE),
+        re.compile(r"--env=(?<!non)(?<!non-)(?<!non_)prod", re.IGNORECASE),
         re.compile(r"master(?:_|\b)", re.IGNORECASE),  # Master database/branch operations
         re.compile(r"main(?:_|\b)", re.IGNORECASE),  # Main branch operations
     ]
@@ -177,7 +181,8 @@ class DangerousPatternDetector:
                     f"Blocked: Dangerous infrastructure operation detected - {pattern.pattern}",
                 )
 
-        # Check production operations
+        # Check production operations (PRODUCTION_PATTERNS use negative
+        # lookbehinds to allow nonprod/non-prod/nonproduction)
         for pattern in self.PRODUCTION_PATTERNS:
             if pattern.search(stripped):
                 return (
