@@ -88,6 +88,12 @@ CONFIDENCE_CAPS: dict[str, tuple[float, list[re.Pattern[str]]]] = {
             re.compile(r"kubectl\s+delete\s+statefulset\b", re.IGNORECASE),
         ],
     ),
+    "git_destructive": (
+        0.15,  # git reset --hard loses uncommitted work — always human approval
+        [
+            re.compile(r"git\s+reset\s+--hard", re.IGNORECASE),
+        ],
+    ),
     "k8s_statefulset_scale": (
         0.60,  # Scaling statefulsets is legitimate but warrants review
         [

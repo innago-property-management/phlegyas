@@ -238,6 +238,19 @@ class TestConfidenceCaps:
         )
         assert capped.confidence <= 0.15
 
+    def test_git_reset_hard_capped_to_human(self, evaluator):
+        """git reset --hard is destructive — confidence must be capped very low."""
+        evaluation = EvaluationResult(
+            decision="approve",
+            category="high_risk",
+            reasoning="Cleaning up local branch",
+            confidence=0.95,
+        )
+        capped = evaluator._apply_confidence_caps(
+            evaluation, "Bash", {"command": "git reset --hard HEAD~5"}
+        )
+        assert capped.confidence <= 0.15
+
     def test_kubectl_delete_statefulset_capped_to_human(self, evaluator):
         """kubectl delete statefulset is data loss — always requires human."""
         evaluation = EvaluationResult(

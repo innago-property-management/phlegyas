@@ -68,7 +68,6 @@ def dangerous_bash_commands() -> list[str]:
         "mkfs.ext4 /dev/sda",
         "git push --force origin main",
         "git push -f origin master",
-        "git reset --hard HEAD~5",
         "git clean -fd",
         "curl -X DELETE https://api.production.com/users",
         "wget --delete-after http://example.com",

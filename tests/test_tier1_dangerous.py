@@ -171,11 +171,11 @@ class TestDangerousPatternDetector:
         assert is_dangerous is True
         assert "git operation" in reason.lower()
 
-    def test_should_block_git_reset_hard(self, detector):
-        """Should block git reset --hard commands."""
-        is_dangerous, reason = detector.is_dangerous("Bash", {"command": "git reset --hard HEAD~5"})
-        assert is_dangerous is True
-        assert "git operation" in reason.lower()
+    def test_git_reset_hard_falls_through(self, detector):
+        """git reset --hard falls to Tier 3 (destructive but legitimately needed).
+        Confidence cap ensures it always requires human approval."""
+        is_dangerous, _ = detector.is_dangerous("Bash", {"command": "git reset --hard HEAD~5"})
+        assert is_dangerous is False
 
     def test_should_block_git_clean_fd(self, detector):
         """Should block git clean -fd commands."""
@@ -380,10 +380,10 @@ class TestPrefixStripping:
         assert is_dangerous is True
         assert "git operation" in reason.lower()
 
-    def test_sudo_git_reset_hard(self, detector):
-        """Should catch dangerous git through sudo prefix."""
+    def test_sudo_git_push_force(self, detector):
+        """Should catch dangerous git force-push through sudo prefix."""
         is_dangerous, reason = detector.is_dangerous(
-            "Bash", {"command": "sudo git reset --hard HEAD~5"}
+            "Bash", {"command": "sudo git push --force origin main"}
         )
         assert is_dangerous is True
         assert "git operation" in reason.lower()

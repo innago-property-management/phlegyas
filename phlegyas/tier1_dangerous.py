@@ -90,9 +90,11 @@ class DangerousPatternDetector:
     DANGEROUS_GIT_PATTERNS = [
         re.compile(r"git\s+push\s+--force", re.IGNORECASE),
         re.compile(r"git\s+push\s+-f", re.IGNORECASE),
-        re.compile(r"git\s+reset\s+--hard", re.IGNORECASE),
         re.compile(r"git\s+clean\s+-[fF]d", re.IGNORECASE),
         re.compile(r"git\s+push.*origin\s+(main|master)", re.IGNORECASE),
+        # git reset --hard excluded from instant-deny — legitimately needed
+        # sometimes. Falls through to Tier 3 with git_destructive confidence
+        # cap (0.15) to always require human approval.
     ]
 
     NETWORK_PATTERNS = [
