@@ -265,6 +265,8 @@ class SafeOperationDetector:
         # Process management (read-only)
         re.compile(r"^lsof\s+", re.IGNORECASE),
         re.compile(r"^pgrep\s+", re.IGNORECASE),
+        # OpenClaw CLI
+        re.compile(r"^openclaw(\s+|$)", re.IGNORECASE),
     ]
 
     # Filesystem operations (non-destructive, no data exfiltration risk)
