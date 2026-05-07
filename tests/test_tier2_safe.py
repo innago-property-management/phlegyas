@@ -534,7 +534,10 @@ class TestSafeOperationDetector:
             "pgrep node",
             "openclaw --help",
             "openclaw --version",
-            "openclaw chat",
+            "openclaw update",
+            "openclaw doctor",
+            "openclaw status",
+            "openclaw backup",
         ],
     )
     def test_should_approve_macos_and_utility_commands(self, detector, command):

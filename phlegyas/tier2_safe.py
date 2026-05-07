@@ -265,7 +265,10 @@ class SafeOperationDetector:
         # Process management (read-only)
         re.compile(r"^lsof\s+", re.IGNORECASE),
         re.compile(r"^pgrep\s+", re.IGNORECASE),
-        # OpenClaw CLI
+        # OpenClaw CLI — broad allow is intentional. Used by AI agents to
+        # manage openclaw upgrades (update/doctor/status/etc), which has
+        # been flaky due to breaking changes. Tier 1 still blocks any
+        # destructive shell wrappers around openclaw invocations.
         re.compile(r"^openclaw(\s+|$)", re.IGNORECASE),
     ]
 
