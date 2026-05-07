@@ -532,6 +532,12 @@ class TestSafeOperationDetector:
             "vt title 'Running tests'",
             "lsof -i :8080",
             "pgrep node",
+            "openclaw --help",
+            "openclaw --version",
+            "openclaw update",
+            "openclaw doctor",
+            "openclaw status",
+            "openclaw backup",
         ],
     )
     def test_should_approve_macos_and_utility_commands(self, detector, command):
